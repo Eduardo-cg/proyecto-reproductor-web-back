@@ -1,0 +1,17 @@
+spring:
+  r2dbc:
+    pool:
+      max-size: 50
+      max-idle-time: 60s
+
+app:
+  storage:
+    base-path: /var/music/audio
+
+  cors:
+    allowed-origins: ${CORS_ORIGINS}
+
+logging:
+  level:
+    com.musicstreaming: INFO
+    org.springframework.security: WARN

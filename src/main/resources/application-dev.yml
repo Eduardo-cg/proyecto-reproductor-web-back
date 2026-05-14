@@ -1,0 +1,21 @@
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/musicdb
+    username: postgres
+    password: postgres
+
+app:
+  jwt:
+    secret: dev-secret-key-must-be-at-least-32-characters-long-for-hs256
+    expiration: 86400000
+
+  storage:
+    base-path: C:/temp/music-storage
+
+  cors:
+    allowed-origins: http://localhost:5173,http://localhost:3000,http://localhost:8081
+
+logging:
+  level:
+    com.musicstreaming: DEBUG
+    org.springframework.security: DEBUG
