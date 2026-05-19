@@ -55,7 +55,7 @@ public class AuthService {
                     );
                     return userRepository.save(user);
                 })
-                .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), user.getRole()))
+                .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail()))
                 .doOnSuccess(u -> log.info("User registered: {}", u.getUsername()));
     }
 
@@ -70,16 +70,14 @@ public class AuthService {
                             user.getId(),
                             user.getUsername(),
                             user.getEmail(),
-                            user.getPasswordHash(),
-                            user.getRole()
+                            user.getPasswordHash()
                     );
                     String token = jwtTokenProvider.generateToken(userPrincipal);
 
                     LoginResponse.UserInfo userInfo = new LoginResponse.UserInfo(
                             user.getId(),
                             user.getUsername(),
-                            user.getEmail(),
-                            user.getRole()
+                            user.getEmail()
                     );
 
                     return Mono.just(new LoginResponse(token, jwtExpiration, userInfo));
@@ -90,6 +88,6 @@ public class AuthService {
     public Mono<UserResponse> getCurrentUser(Long userId) {
         return userRepository.findById(userId)
                 .switchIfEmpty(Mono.error(new RuntimeException("User not found")))
-                .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), user.getRole()));
+                .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail()));
     }
 }

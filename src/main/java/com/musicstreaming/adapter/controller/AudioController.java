@@ -9,11 +9,12 @@ import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -21,10 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
-import reactor.core.scheduler.Schedulers;
-
 @RestController
-@RequestMapping("/api/v1/tracks")
+@RequestMapping("/api/tracks")
 public class AudioController {
 
     private static final Logger log = LoggerFactory.getLogger(AudioController.class);
@@ -35,24 +34,22 @@ public class AudioController {
         this.audioService = audioService;
     }
 
-    @PostMapping
+    @PostMapping(consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
     public Mono<ResponseEntity<TrackDTO>> uploadTrack(
-            @RequestParam("title") String title,
-            @RequestParam("artist") String artist,
-            @RequestParam(value = "album", required = false) String album,
-            @RequestParam("duration") Integer duration,
-            @RequestPart("file") MultipartFile file) {
-
-        if (file.isEmpty()) {
-            return Mono.just(ResponseEntity.badRequest().build());
-        }
+            @RequestPart("title") String title,
+            @RequestPart("artist") String artist,
+            @RequestPart("album") String album,
+            @RequestPart("duration") String duration,
+            @RequestPart("file") FilePart file,
+            @RequestPart(value = "cover", required = false) FilePart cover) {
 
         return audioService.uploadTrack(
                 title,
                 artist,
                 album,
-                duration,
-                file
+                Integer.valueOf(duration),
+                file,
+                cover
         ).map(track -> ResponseEntity.status(HttpStatus.CREATED).body(track));
     }
 
@@ -69,7 +66,7 @@ public class AudioController {
 
         return audioService.getAllTracks(page, size)
                 .collectList()
-                .map(tracks -> ResponseEntity.ok(tracks));
+                .map(ResponseEntity::ok);
     }
 
     @GetMapping("/count")
@@ -143,40 +140,43 @@ public class AudioController {
         int chunkSize = 64 * 1024;
 
         return Flux.<DataBuffer, RandomAccessFile>generate(
-                () -> {
-                    RandomAccessFile file = new RandomAccessFile(path.toFile(), "r");
-                    file.seek(start);
-                    return file;
-                },
-                (file, sink) -> {
-                    try {
-                        long remaining = end - file.getFilePointer() + 1;
-                        if (remaining <= 0) {
-                            sink.complete();
+                        () -> {
+                            RandomAccessFile file = new RandomAccessFile(path.toFile(), "r");
+                            file.seek(start);
                             return file;
-                        }
-                        int readSize = (int) Math.min(chunkSize, remaining);
-                        byte[] chunk = new byte[readSize];
-                        int bytesRead = file.read(chunk);
-                        if (bytesRead <= 0) {
-                            sink.complete();
-                        } else {
-                            byte[] actual = bytesRead < readSize
-                                    ? java.util.Arrays.copyOf(chunk, bytesRead)
-                                    : chunk;
-                            sink.next(DefaultDataBufferFactory.sharedInstance.wrap(actual));
-                            if (file.getFilePointer() > end) {
-                                sink.complete();
+                        },
+                        (file, sink) -> {
+                            try {
+                                long remaining = end - file.getFilePointer() + 1;
+                                if (remaining <= 0) {
+                                    sink.complete();
+                                    return file;
+                                }
+                                int readSize = (int) Math.min(chunkSize, remaining);
+                                byte[] chunk = new byte[readSize];
+                                int bytesRead = file.read(chunk);
+                                if (bytesRead <= 0) {
+                                    sink.complete();
+                                } else {
+                                    byte[] actual = bytesRead < readSize
+                                            ? java.util.Arrays.copyOf(chunk, bytesRead)
+                                            : chunk;
+                                    sink.next(DefaultDataBufferFactory.sharedInstance.wrap(actual));
+                                    if (file.getFilePointer() > end) {
+                                        sink.complete();
+                                    }
+                                }
+                            } catch (IOException e) {
+                                sink.error(e);
                             }
-                        }
-                    } catch (IOException e) {
-                        sink.error(e);
-                    }
-                    return file;
-                },
-                file -> {
-                    try { file.close(); } catch (IOException ignored) {}
-                })
+                            return file;
+                        },
+                        file -> {
+                            try {
+                                file.close();
+                            } catch (IOException ignored) {
+                            }
+                        })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

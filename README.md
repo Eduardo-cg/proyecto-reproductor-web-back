@@ -79,23 +79,23 @@ mvn spring-boot:run -Dspring-boot.run.profiles=prod
 
 | Método | Path | Descripción |
 |--------|------|-------------|
-| POST | `/api/v1/auth/register` | Registrarse |
-| POST | `/api/v1/auth/login` | Login (devuelve JWT) |
-| GET | `/api/v1/auth/me` | Usuario actual |
+| POST | `/api/auth/register` | Registrarse |
+| POST | `/api/auth/login` | Login (devuelve JWT) |
+| GET | `/api/auth/me` | Usuario actual |
 | | | |
-| POST | `/api/v1/tracks` | Subir track (multipart) |
-| GET | `/api/v1/tracks` | Listar tracks |
-| GET | `/api/v1/tracks/{id}` | Metadata del track |
-| GET | `/api/v1/tracks/{id}/stream` | Streamming con soporte Range |
-| DELETE | `/api/v1/tracks/{id}` | Eliminar track |
+| POST | `/api/tracks` | Subir track (multipart) |
+| GET | `/api/tracks` | Listar tracks |
+| GET | `/api/tracks/{id}` | Metadata del track |
+| GET | `/api/tracks/{id}/stream` | Streamming con soporte Range |
+| DELETE | `/api/tracks/{id}` | Eliminar track |
 | | | |
-| GET | `/api/v1/playlists` | Listar playlists del usuario |
-| POST | `/api/v1/playlists` | Crear playlist |
-| GET | `/api/v1/playlists/{id}` | Detalle de playlist con tracks |
-| PUT | `/api/v1/playlists/{id}` | Actualizar playlist |
-| DELETE | `/api/v1/playlists/{id}` | Eliminar playlist |
-| POST | `/api/v1/playlists/{id}/tracks/{trackId}` | Agregar track |
-| DELETE | `/api/v1/playlists/{id}/tracks/{trackId}` | Sacar track |
+| GET | `/api/playlists` | Listar playlists del usuario |
+| POST | `/api/playlists` | Crear playlist |
+| GET | `/api/playlists/{id}` | Detalle de playlist con tracks |
+| PUT | `/api/playlists/{id}` | Actualizar playlist |
+| DELETE | `/api/playlists/{id}` | Eliminar playlist |
+| POST | `/api/playlists/{id}/tracks/{trackId}` | Agregar track |
+| DELETE | `/api/playlists/{id}/tracks/{trackId}` | Sacar track |
 | | | |
 | GET | `/actuator/health` | Health check |
 | GET | `/actuator/prometheus` | Métricas Prometheus |
@@ -123,7 +123,7 @@ El endpoint `GET /tracks/{id}/stream` soporta **HTTP Range Requests** (206 Parti
 # Primeros 1MB
 curl -H "Authorization: Bearer <token>" \
      -H "Range: bytes=0-1048575" \
-     http://localhost:8080/api/v1/tracks/1/stream
+     http://localhost:8080/api/tracks/1/stream
 ```
 
 ## Ejemplos de uso
@@ -131,7 +131,7 @@ curl -H "Authorization: Bearer <token>" \
 ### Registro
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/auth/register \
+curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"juan","email":"juan@example.com","password":"secreto123"}'
 ```
@@ -139,7 +139,7 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
 ### Login
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/auth/login \
+curl -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"juan","password":"secreto123"}'
 
@@ -149,7 +149,7 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 ### Subir track
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/tracks \
+curl -X POST http://localhost:8080/api/tracks \
   -H "Authorization: Bearer <token>" \
   -F "title=Mi Canción" \
   -F "artist=Artista" \
@@ -162,12 +162,12 @@ curl -X POST http://localhost:8080/api/v1/tracks \
 ### Crear playlist y agregar track
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/playlists \
+curl -X POST http://localhost:8080/api/playlists \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"name":"Mis Favoritas","description":"Mis canciones favoritas"}'
 
-curl -X POST http://localhost:8080/api/v1/playlists/1/tracks/1 \
+curl -X POST http://localhost:8080/api/playlists/1/tracks/1 \
   -H "Authorization: Bearer <token>"
 ```
 

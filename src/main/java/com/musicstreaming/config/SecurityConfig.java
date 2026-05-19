@@ -51,8 +51,8 @@ public class SecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeExchange(exchanges -> exchanges
-                        .pathMatchers("/api/v1/auth/**").permitAll()
-                        .pathMatchers("/api/v1/public/**").permitAll()
+                        .pathMatchers("/api/auth/**").permitAll()
+                        .pathMatchers("/api/public/**").permitAll()
                         .pathMatchers("/actuator/**").permitAll()
                         .anyExchange().authenticated()
                 )

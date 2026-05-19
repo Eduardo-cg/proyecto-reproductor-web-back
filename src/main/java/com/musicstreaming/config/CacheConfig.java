@@ -23,6 +23,8 @@ public class CacheConfig {
                 .expireAfterWrite(30, TimeUnit.MINUTES)
                 .recordStats());
 
+        cacheManager.setCacheNames(java.util.List.of("covers"));
+
         return cacheManager;
     }
 }

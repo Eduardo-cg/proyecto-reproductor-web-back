@@ -25,8 +25,7 @@ public class ReactiveUserDetailsServiceImpl implements ReactiveUserDetailsServic
                         user.getId(),
                         user.getUsername(),
                         user.getEmail(),
-                        user.getPasswordHash(),
-                        user.getRole()
+                        user.getPasswordHash()
                 ));
     }
 }

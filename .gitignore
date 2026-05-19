@@ -42,3 +42,5 @@ cmake-build-*/
 
 # IntelliJ build output
 out/
+
+.agents/

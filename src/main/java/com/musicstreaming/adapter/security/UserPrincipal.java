@@ -1,7 +1,6 @@
 package com.musicstreaming.adapter.security;
 
 import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
@@ -13,14 +12,12 @@ public class UserPrincipal implements UserDetails {
     private final String username;
     private final String email;
     private final String password;
-    private final String role;
 
-    public UserPrincipal(Long id, String username, String email, String password, String role) {
+    public UserPrincipal(Long id, String username, String email, String password) {
         this.id = id;
         this.username = username;
         this.email = email;
         this.password = password;
-        this.role = role;
     }
 
     public Long getId() {
@@ -31,13 +28,9 @@ public class UserPrincipal implements UserDetails {
         return email;
     }
 
-    public String getRole() {
-        return role;
-    }
-
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of(new SimpleGrantedAuthority("ROLE_" + role));
+        return List.of();
     }
 
     @Override

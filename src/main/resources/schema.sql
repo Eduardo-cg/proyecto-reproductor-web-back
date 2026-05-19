@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) DEFAULT 'USER',
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -25,38 +24,13 @@ CREATE TABLE IF NOT EXISTS tracks (
     file_path VARCHAR(500) NOT NULL,
     mime_type VARCHAR(50) DEFAULT 'audio/mpeg',
     file_size BIGINT NOT NULL,
+    cover_art_path VARCHAR(500),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_tracks_artist ON tracks(artist);
 CREATE INDEX idx_tracks_album ON tracks(album);
-
--- PLAYLISTS
-CREATE TABLE IF NOT EXISTS playlists (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    is_public BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX idx_playlists_user_id ON playlists(user_id);
-
--- PLAYLIST_TRACKS
-CREATE TABLE IF NOT EXISTS playlist_tracks (
-    id BIGSERIAL PRIMARY KEY,
-    playlist_id BIGINT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-    track_id BIGINT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    added_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(playlist_id, track_id)
-);
-
-CREATE INDEX idx_playlist_tracks_playlist_id ON playlist_tracks(playlist_id);
-CREATE INDEX idx_playlist_tracks_track_id ON playlist_tracks(track_id);
 
 -- PLAYBACK_HISTORY (Optional for future)
 CREATE TABLE IF NOT EXISTS playback_history (
