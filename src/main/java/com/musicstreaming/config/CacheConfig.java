@@ -9,7 +9,6 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.concurrent.TimeUnit;
 
-
 @Configuration
 @EnableCaching
 public class CacheConfig {
@@ -17,14 +16,12 @@ public class CacheConfig {
     @Bean
     public CacheManager cacheManager() {
         CaffeineCacheManager cacheManager = new CaffeineCacheManager();
-
         cacheManager.setCaffeine(Caffeine.newBuilder()
                 .maximumSize(1000)
                 .expireAfterWrite(30, TimeUnit.MINUTES)
                 .recordStats());
-
-        cacheManager.setCacheNames(java.util.List.of("covers"));
-
+        cacheManager.setCacheNames(java.util.List.of("covers", "artistImages"));
         return cacheManager;
     }
 }
+

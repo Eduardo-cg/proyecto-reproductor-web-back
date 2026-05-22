@@ -1,5 +1,8 @@
 package com.musicstreaming.adapter.controller;
 
+import com.musicstreaming.shared.exception.ResourceAlreadyExistsException;
+import com.musicstreaming.shared.exception.ResourceNotFoundException;
+import com.musicstreaming.shared.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -15,6 +18,30 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleNotFound(ResourceNotFoundException ex) {
+        return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", ex.getMessage())));
+    }
+
+    @ExceptionHandler(ResourceAlreadyExistsException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleConflict(ResourceAlreadyExistsException ex) {
+        return Mono.just(ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", ex.getMessage())));
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleUnauthorized(UnauthorizedException ex) {
+        return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", ex.getMessage())));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleBadRequest(IllegalArgumentException ex) {
+        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", ex.getMessage())));
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public Mono<ResponseEntity<Map<String, String>>> handleRuntimeException(RuntimeException ex) {
         log.error("Runtime exception: {}", ex.getMessage());
@@ -22,12 +49,10 @@ public class GlobalExceptionHandler {
         String message = ex.getMessage();
         HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
 
-        if (message.contains("not found")) {
-            status = HttpStatus.NOT_FOUND;
-        } else if (message.contains("already exists")) {
-            status = HttpStatus.CONFLICT;
-        } else if (message.contains("Invalid") || message.contains("Access denied")) {
-            status = HttpStatus.UNAUTHORIZED;
+        if (message != null) {
+            if (message.contains("Invalid") || message.contains("Access denied")) {
+                status = HttpStatus.UNAUTHORIZED;
+            }
         }
 
         return Mono.just(ResponseEntity.status(status)
@@ -37,7 +62,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public Mono<ResponseEntity<Map<String, String>>> handleException(Exception ex) {
         log.error("Unexpected exception: {}", ex.getMessage(), ex);
-
         return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Internal server error")));
     }

@@ -11,7 +11,7 @@ public interface TrackRepository extends R2dbcRepository<Track, Long> {
 
     Flux<Track> findByUserId(Long userId, Pageable pageable);
 
-    @Query("SELECT * FROM tracks WHERE user_id = :userId AND (title ILIKE :query OR artist ILIKE :query OR album ILIKE :query)")
+    @Query("SELECT * FROM tracks WHERE user_id = :userId AND (title ILIKE :query OR album ILIKE :query)")
     Flux<Track> searchTracksByUser(Long userId, String query);
 
     Mono<Long> countByUserId(Long userId);
