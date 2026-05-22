@@ -1,17 +1,18 @@
 # Music Streaming Backend
 
-Backend reactivo para plataforma de streaming de música estilo Spotify.
+Backend reactivo para plataforma de streaming de música estilo Spotify. Construido con Spring WebFlux, R2DBC y PostgreSQL, siguiendo arquitectura hexagonal.
 
 ## Stack
 
 - **Java 21** con Virtual Threads
 - **Spring Boot 3.4.x** con **WebFlux** (Netty)
 - **Spring Data R2DBC** + **PostgreSQL 16**
-- **JWT** (HS256) autenticación embebida
-- **Caffeine** caché en memoria
+- **Spring Security WebFlux** + **JWT** (HS256) autenticación embebida
+- **Caffeine** caché en memoria (cover images)
 - **Resilience4j** circuit breaker
 - **Micrometer** + **Prometheus** métricas
 - **Docker Compose** para PostgreSQL
+- **Lombok**, **Jakarta Validation**, **Jackson**
 
 ## Arquitectura
 
@@ -19,23 +20,23 @@ Hexagonal (puertos & adaptadores):
 
 ```
 src/main/java/com/musicstreaming/
-├── Application.java              # Entry point
-├── config/                       # Configuración (cache, seguridad)
+├── Application.java                     # Entry point
+├── config/                              # Config (seguridad, caché)
 ├── domain/
-│   ├── model/                    # Entidades de dominio
-│   ├── repository/               # Puertos de repositorio (R2DBC)
-│   └── service/                  # Lógica de negocio
+│   ├── model/                           # Entidades: User, Track, Album, Artist
+│   ├── repository/                      # Repositorios R2DBC
+│   └── service/                         # Lógica de negocio (Auth, Audio, Album, Artist)
 └── adapter/
-    ├── controller/               # REST controllers
-    ├── dto/                      # Request/Response DTOs
-    └── security/                 # JWT, filtros, UserDetails
+    ├── controller/                      # REST controllers + GlobalExceptionHandler
+    ├── dto/                             # Request/Response DTOs
+    └── security/                        # JWT, filtros, UserDetails
 ```
 
 ## Prerrequisitos
 
 - Java 21+
 - Docker (para PostgreSQL)
-- Maven 3.9+ (o usar el bundlado de IntelliJ)
+- Maven 3.9+
 
 ## Quick Start
 
@@ -45,7 +46,7 @@ src/main/java/com/musicstreaming/
 docker-compose up -d
 ```
 
-Crea automaticamente la base de datos `musicdb` y ejecuta `schema.sql`.
+Crea automáticamente la base de datos `musicdb` y ejecuta `schema.sql`.
 
 ### 2. Configurar almacenamiento
 
@@ -75,56 +76,89 @@ Activa el perfil `dev` por defecto. Para producción:
 mvn spring-boot:run -Dspring-boot.run.profiles=prod
 ```
 
-### 4. Endpoints
+## Endpoints
+
+### Auth
 
 | Método | Path | Descripción |
 |--------|------|-------------|
 | POST | `/api/auth/register` | Registrarse |
 | POST | `/api/auth/login` | Login (devuelve JWT) |
 | GET | `/api/auth/me` | Usuario actual |
-| | | |
+
+### Tracks
+
+| Método | Path | Descripción |
+|--------|------|-------------|
 | POST | `/api/tracks` | Subir track (multipart) |
-| GET | `/api/tracks` | Listar tracks |
+| GET | `/api/tracks` | Listar tracks (paginado) |
 | GET | `/api/tracks/{id}` | Metadata del track |
-| GET | `/api/tracks/{id}/stream` | Streamming con soporte Range |
+| GET | `/api/tracks/{id}/stream` | Streaming con soporte Range (206) |
 | DELETE | `/api/tracks/{id}` | Eliminar track |
-| | | |
-| GET | `/api/playlists` | Listar playlists del usuario |
-| POST | `/api/playlists` | Crear playlist |
-| GET | `/api/playlists/{id}` | Detalle de playlist con tracks |
-| PUT | `/api/playlists/{id}` | Actualizar playlist |
-| DELETE | `/api/playlists/{id}` | Eliminar playlist |
-| POST | `/api/playlists/{id}/tracks/{trackId}` | Agregar track |
-| DELETE | `/api/playlists/{id}/tracks/{trackId}` | Sacar track |
-| | | |
+| GET | `/api/tracks/count` | Cantidad total de tracks |
+
+### Albums
+
+| Método | Path | Descripción |
+|--------|------|-------------|
+| POST | `/api/albums` | Crear álbum (multipart) |
+| GET | `/api/albums` | Listar álbumes (paginado) |
+| GET | `/api/albums/{id}` | Detalle del álbum con sus tracks |
+| DELETE | `/api/albums/{id}` | Eliminar álbum (cascada) |
+| POST | `/api/albums/{id}/tracks` | Agregar track al álbum (multipart) |
+
+### Artists
+
+| Método | Path | Descripción |
+|--------|------|-------------|
+| GET | `/api/artists` | Listar artistas (búsqueda con `?search=`) |
+| GET | `/api/artists/{id}` | Detalle del artista |
+| POST | `/api/artists` | Crear artista (multipart) |
+| PUT | `/api/artists/{id}` | Actualizar artista (multipart) |
+| DELETE | `/api/artists/{id}` | Eliminar artista |
+
+### Actuator
+
+| Método | Path | Descripción |
+|--------|------|-------------|
 | GET | `/actuator/health` | Health check |
 | GET | `/actuator/prometheus` | Métricas Prometheus |
 
 ## Modelo de datos
 
 ```sql
-users (id, username, email, password, display_name, avatar_url, created_at, updated_at)
-tracks (id, title, artist, album, duration, genre, file_path, file_size, mime_type, uploaded_by, created_at, updated_at)
-playlists (id, name, description, cover_image, user_id, created_at, updated_at)
-playlist_tracks (id, playlist_id, track_id, position, added_at)
-playback_history (id, user_id, track_id, played_at)
+users           (id, username, email, password_hash, created_at, updated_at)
+tracks          (id, title, duration, file_path, file_size, mime_type, cover_path, user_id, created_at, updated_at)
+albums          (id, title, release_date, cover_path, user_id, created_at, updated_at)
+artists         (id, name, image_path, user_id, created_at, updated_at)
+album_tracks    (id, album_id, track_id, position)
+track_artists   (id, track_id, artist_id, position)
+album_artists   (id, album_id, artist_id, position)
+playback_history (id, user_id, track_id, played_at, progress)
 ```
 
 ## Streaming de audio
 
-El endpoint `GET /tracks/{id}/stream` soporta **HTTP Range Requests** (206 Partial Content):
+`GET /api/tracks/{id}/stream` soporta **HTTP Range Requests** (206 Partial Content):
 
-- Sin header `Range`: devuelve el archivo completo
-- Con `Range: bytes=0-1023`: devuelve solo los primeros 1024 bytes
-- Usa `RandomAccessFile` + `Flux.generate` para lectura por chunks sin cargar todo el archivo en memoria
+- Sin header `Range`: archivo completo
+- Con `Range: bytes=0-1023`: primeros 1024 bytes
+- Usa `RandomAccessFile` + `Flux.generate` para lectura por chunks (64KB)
 - `subscribeOn(Schedulers.boundedElastic())` para no bloquear el event loop de Netty
 
 ```bash
-# Primeros 1MB
 curl -H "Authorization: Bearer <token>" \
      -H "Range: bytes=0-1048575" \
      http://localhost:8080/api/tracks/1/stream
 ```
+
+## Caché
+
+Cobertura de imágenes vía **Caffeine** con TTL de 1 hora:
+
+- `AudioService`: caché de bytes de cover de tracks
+- `AlbumService`: caché de bytes de cover de álbumes
+- `ArtistService`: caché de bytes de imagen de artista
 
 ## Ejemplos de uso
 
@@ -152,23 +186,34 @@ curl -X POST http://localhost:8080/api/auth/login \
 curl -X POST http://localhost:8080/api/tracks \
   -H "Authorization: Bearer <token>" \
   -F "title=Mi Canción" \
-  -F "artist=Artista" \
-  -F "album=Álbum Uno" \
-  -F "genre=Rock" \
-  -F "duration=240" \
   -F "file=@cancion.mp3"
 ```
 
-### Crear playlist y agregar track
+### Crear artista
 
 ```bash
-curl -X POST http://localhost:8080/api/playlists \
+curl -X POST http://localhost:8080/api/artists \
   -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Mis Favoritas","description":"Mis canciones favoritas"}'
+  -F "name=Mi Banda" \
+  -F "image=@foto.jpg"
+```
 
-curl -X POST http://localhost:8080/api/playlists/1/tracks/1 \
-  -H "Authorization: Bearer <token>"
+### Crear álbum y agregar track
+
+```bash
+# Crear álbum
+curl -X POST http://localhost:8080/api/albums \
+  -H "Authorization: Bearer <token>" \
+  -F "title=Mi Álbum" \
+  -F "artistIds=1" \
+  -F "cover=@cover.jpg"
+
+# Agregar track al álbum
+curl -X POST http://localhost:8080/api/albums/1/tracks \
+  -H "Authorization: Bearer <token>" \
+  -F "title=Tema 1" \
+  -F "artistIds=1" \
+  -F "file=@tema1.mp3"
 ```
 
 ## Configuración
@@ -181,8 +226,9 @@ curl -X POST http://localhost:8080/api/playlists/1/tracks/1 \
 | `DB_USER` | postgres | Usuario PostgreSQL |
 | `DB_PASSWORD` | postgres | Contraseña PostgreSQL |
 | `JWT_SECRET` | *default dev* | Secreto para firmar JWT (min 32 chars) |
+| `JWT_EXPIRATION` | 86400000 | Expiración del token en ms |
 | `STORAGE_PATH` | /data/audio | Ruta de almacenamiento de archivos |
-| `CORS_ORIGINS` | varios orígenes locales | Orígenes CORS permitidos |
+| `CORS_ORIGINS` | http://localhost:5173 | Orígenes CORS permitidos |
 | `SPRING_PROFILES_ACTIVE` | dev | Perfil activo |
 
 Perfiles:

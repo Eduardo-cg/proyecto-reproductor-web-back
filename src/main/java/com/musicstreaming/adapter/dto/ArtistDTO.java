@@ -5,17 +5,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.LocalDate;
-
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class TrackUploadRequest {
+public class ArtistDTO {
 
-    private String title;
-    private String artist;
-    private String album;
-    private Integer duration;
-    private LocalDate releaseDate;
+    private Long id;
+    private String name;
+    private String image;
+    private Long userId;
 }

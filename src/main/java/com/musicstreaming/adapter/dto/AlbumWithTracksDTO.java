@@ -1,6 +1,5 @@
 package com.musicstreaming.adapter.dto;
 
-import com.musicstreaming.domain.model.Track;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -15,34 +14,17 @@ import java.util.stream.Collectors;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class TrackDTO {
+public class AlbumWithTracksDTO {
 
     private Long id;
     private String title;
     private List<ArtistDTO> artists = new ArrayList<>();
     private String artistDisplay;
-    private String album;
-    private Integer duration;
+    private LocalDate releaseDate;
     private String cover;
     private Long userId;
-    private LocalDate releaseDate;
-
-    public static TrackDTO fromEntity(Track track) {
-        TrackDTO dto = new TrackDTO();
-        dto.id = track.getId();
-        dto.title = track.getTitle();
-        dto.album = track.getAlbum();
-        dto.duration = track.getDuration();
-        dto.userId = track.getUserId();
-        dto.releaseDate = track.getReleaseDate();
-        return dto;
-    }
-
-    public static TrackDTO fromEntity(Track track, String coverBase64) {
-        TrackDTO dto = fromEntity(track);
-        dto.cover = coverBase64;
-        return dto;
-    }
+    private int trackCount;
+    private List<TrackDTO> tracks;
 
     public void setArtists(List<ArtistDTO> artists) {
         this.artists = artists;

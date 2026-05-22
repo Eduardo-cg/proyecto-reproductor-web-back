@@ -1,9 +1,17 @@
 package com.musicstreaming.domain.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.musicstreaming.adapter.dto.ArtistDTO;
+import com.musicstreaming.adapter.dto.PageResponse;
 import com.musicstreaming.adapter.dto.TrackDTO;
+import com.musicstreaming.domain.model.Artist;
 import com.musicstreaming.domain.model.Track;
+import com.musicstreaming.domain.model.TrackArtist;
+import com.musicstreaming.domain.repository.ArtistRepository;
+import com.musicstreaming.domain.repository.TrackArtistRepository;
 import com.musicstreaming.domain.repository.TrackRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,10 +28,13 @@ import reactor.core.publisher.Mono;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class AudioService {
@@ -31,14 +42,23 @@ public class AudioService {
     private static final Logger log = LoggerFactory.getLogger(AudioService.class);
 
     private final TrackRepository trackRepository;
+    private final TrackArtistRepository trackArtistRepository;
+    private final ArtistRepository artistRepository;
+    private final ArtistService artistService;
     private final DataBufferFactory dataBufferFactory;
     private final Cache<Long, byte[]> coverCache;
 
     @Value("${app.storage.base-path}")
     private String storageBasePath;
 
-    public AudioService(TrackRepository trackRepository) {
+    public AudioService(TrackRepository trackRepository,
+                        TrackArtistRepository trackArtistRepository,
+                        ArtistRepository artistRepository,
+                        ArtistService artistService) {
         this.trackRepository = trackRepository;
+        this.trackArtistRepository = trackArtistRepository;
+        this.artistRepository = artistRepository;
+        this.artistService = artistService;
         this.dataBufferFactory = DefaultDataBufferFactory.sharedInstance;
         this.coverCache = Caffeine.newBuilder()
                 .maximumSize(500)
@@ -46,16 +66,14 @@ public class AudioService {
                 .build();
     }
 
-    public Mono<TrackDTO> uploadTrack(String title, String artist, String album, Integer duration, FilePart file, FilePart cover) {
+    public Mono<TrackDTO> uploadTrack(String title, List<Long> artistIds, String album,
+                                        Integer duration, FilePart file,
+                                        FilePart cover, Long userId, LocalDate releaseDate) {
         String originalFilename = file.filename();
         String extension = getFileExtension(originalFilename);
-        String mimeType = getMimeType(extension);
-
-        String artistFolder = sanitizeFolderName(artist);
-        String albumFolder = sanitizeFolderName(album != null ? album : "unknown");
         String trackId = UUID.randomUUID().toString();
 
-        String relativePath = artistFolder + "/" + albumFolder + "/" + trackId + "." + extension;
+        String relativePath = userId + "/tracks/" + trackId + "." + extension;
         Path fullPath = Paths.get(storageBasePath, relativePath);
 
         return Mono.fromCallable(() -> {
@@ -66,18 +84,17 @@ public class AudioService {
                 .flatMap(path -> {
                     Track track = new Track();
                     track.setTitle(title);
-                    track.setArtist(artist);
                     track.setAlbum(album);
                     track.setDuration(duration);
                     track.setFilePath(relativePath);
-                    track.setMimeType(mimeType);
-                    track.setFileSize(file.headers().getContentLength());
+                    track.setUserId(userId);
+                    track.setReleaseDate(releaseDate);
                     track.setCreatedAt(LocalDateTime.now());
                     track.setUpdatedAt(LocalDateTime.now());
 
                     if (cover != null) {
                         String coverExt = getFileExtension(cover.filename());
-                        String coverRelativePath = "covers/" + trackId + "." + coverExt;
+                        String coverRelativePath = userId + "/covers/" + trackId + "." + coverExt;
                         Path coverFullPath = Paths.get(storageBasePath, coverRelativePath);
                         return Mono.fromCallable(() -> {
                                     Files.createDirectories(coverFullPath.getParent());
@@ -92,70 +109,130 @@ public class AudioService {
 
                     return trackRepository.save(track);
                 })
+                .flatMap(track -> saveTrackArtists(track.getId(), artistIds).thenReturn(track))
                 .flatMap(this::trackToDtoWithCover)
-                .doOnSuccess(t -> log.info("Track uploaded: {} by {}", t.getTitle(), t.getArtist()));
+                .doOnSuccess(t -> log.info("Track uploaded: {} with {} artists", t.getTitle(), t.getArtists().size()));
     }
 
-    public Mono<TrackDTO> getTrackMetadata(Long trackId) {
-        return trackRepository.findById(trackId)
-                .switchIfEmpty(Mono.error(new RuntimeException("Track not found")))
-                .flatMap(this::trackToDtoWithCover);
-    }
-
-    public Flux<TrackDTO> getAllTracks(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        return trackRepository.findAllBy(pageable)
-                .flatMap(this::trackToDtoWithCover);
-    }
-
-    public Mono<Long> getTrackCount() {
-        return trackRepository.count();
-    }
-
-    public Mono<Void> deleteTrack(Long trackId) {
+    public Mono<TrackDTO> getTrackMetadata(Long trackId, Long userId) {
         return trackRepository.findById(trackId)
                 .switchIfEmpty(Mono.error(new RuntimeException("Track not found")))
                 .flatMap(track -> {
+                    if (!track.getUserId().equals(userId)) {
+                        return Mono.error(new RuntimeException("Track not found"));
+                    }
+                    return trackToDtoWithCover(track);
+                });
+    }
+
+    public Mono<PageResponse<TrackDTO>> getUserTracks(Long userId, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Mono<List<TrackDTO>> content = trackRepository.findByUserId(userId, pageable)
+                .flatMap(this::trackToDtoWithCover)
+                .collectList();
+        Mono<Long> total = trackRepository.countByUserId(userId);
+        return Mono.zip(content, total, (tracks, totalElements) -> PageResponse.of(tracks, totalElements, page, size));
+    }
+
+    public Mono<Long> getUserTrackCount(Long userId) {
+        return trackRepository.countByUserId(userId);
+    }
+
+    public Mono<Void> deleteTrack(Long trackId, Long userId) {
+        return trackRepository.findById(trackId)
+                .switchIfEmpty(Mono.error(new RuntimeException("Track not found")))
+                .flatMap(track -> {
+                    if (!track.getUserId().equals(userId)) {
+                        return Mono.error(new RuntimeException("Track not found"));
+                    }
                     Path fullPath = Paths.get(storageBasePath, track.getFilePath());
-                    return Mono.fromCallable(() -> {
-                                Files.deleteIfExists(fullPath);
-                                if (track.getCoverPath() != null) {
-                                    Path coverPath = Paths.get(storageBasePath, track.getCoverPath());
-                                    Files.deleteIfExists(coverPath);
-                                }
-                                return true;
-                            })
+                    return trackArtistRepository.deleteByTrackId(trackId)
+                            .then(Mono.fromCallable(() -> {
+                                        Files.deleteIfExists(fullPath);
+                                        if (track.getCoverPath() != null) {
+                                            Path coverPath = Paths.get(storageBasePath, track.getCoverPath());
+                                            Files.deleteIfExists(coverPath);
+                                        }
+                                        return true;
+                                    }))
                             .then(trackRepository.deleteById(trackId));
                 })
                 .doOnSuccess(v -> log.info("Track deleted: {}", trackId));
     }
 
-    public Mono<Path> getTrackFilePath(Long trackId) {
+    public Mono<Path> getTrackFilePath(Long trackId, Long userId) {
         return trackRepository.findById(trackId)
                 .switchIfEmpty(Mono.error(new RuntimeException("Track not found")))
-                .map(track -> Paths.get(storageBasePath, track.getFilePath()));
+                .flatMap(track -> {
+                    if (!track.getUserId().equals(userId)) {
+                        return Mono.error(new RuntimeException("Track not found"));
+                    }
+                    return Mono.just(Paths.get(storageBasePath, track.getFilePath()));
+                });
+    }
+
+    private Mono<Void> saveTrackArtists(Long trackId, List<Long> artistIds) {
+        if (artistIds == null || artistIds.isEmpty()) {
+            return Mono.empty();
+        }
+
+        List<Mono<TrackArtist>> saves = new ArrayList<>();
+        for (int i = 0; i < artistIds.size(); i++) {
+            Long artistId = artistIds.get(i);
+            int position = i + 1;
+
+            TrackArtist ta = new TrackArtist();
+            ta.setTrackId(trackId);
+            ta.setArtistId(artistId);
+            ta.setPosition(position);
+            ta.setCreatedAt(LocalDateTime.now());
+
+            saves.add(trackArtistRepository.save(ta));
+        }
+
+        return Flux.concat(saves).then();
+    }
+
+    private Mono<List<ArtistDTO>> getTrackArtists(Long trackId) {
+        return trackArtistRepository.findByTrackIdOrderByPosition(trackId)
+                .flatMap(ta -> artistRepository.findById(ta.getArtistId()))
+                .collectList()
+                .flatMap(artists -> {
+                    List<Mono<ArtistDTO>> dtos = new ArrayList<>();
+                    for (Artist a : artists) {
+                        dtos.add(artistToDtoSimple(a));
+                    }
+                    return Flux.concat(dtos).collectList();
+                });
+    }
+
+    private Mono<ArtistDTO> artistToDtoSimple(Artist artist) {
+        return Mono.fromCallable(() -> {
+            ArtistDTO dto = new ArtistDTO();
+            dto.setId(artist.getId());
+            dto.setName(artist.getName());
+            dto.setUserId(artist.getUserId());
+
+            if (artist.getImagePath() != null) {
+                try {
+                    Path path = Paths.get(storageBasePath, artist.getImagePath());
+                    byte[] bytes = Files.readAllBytes(path);
+                    String ext = getFileExtension(artist.getImagePath());
+                    String mimeType = getCoverMimeType(ext);
+                    String base64 = Base64.getEncoder().encodeToString(bytes);
+                    dto.setImage("data:" + mimeType + ";base64," + base64);
+                } catch (Exception e) {
+                    log.warn("Could not load image for artist {}", artist.getId());
+                }
+            }
+            return dto;
+        });
     }
 
     private String getFileExtension(String filename) {
         if (filename == null) return "mp3";
         int lastDot = filename.lastIndexOf('.');
         return lastDot > 0 ? filename.substring(lastDot + 1).toLowerCase() : "mp3";
-    }
-
-    private String getMimeType(String extension) {
-        return switch (extension) {
-            case "mp3" -> "audio/mpeg";
-            case "wav" -> "audio/wav";
-            case "ogg" -> "audio/ogg";
-            case "flac" -> "audio/flac";
-            case "m4a" -> "audio/mp4";
-            default -> "audio/mpeg";
-        };
-    }
-
-    private String sanitizeFolderName(String name) {
-        if (name == null || name.isEmpty()) return "unknown";
-        return name.replaceAll("[^a-zA-Z0-9\\-_]", "_");
     }
 
     private String getCoverMimeType(String extension) {
@@ -182,15 +259,28 @@ public class AudioService {
     }
 
     private Mono<TrackDTO> trackToDtoWithCover(Track track) {
+        TrackDTO baseDto = TrackDTO.fromEntity(track);
+
+        Mono<List<ArtistDTO>> artistsMono = getTrackArtists(track.getId());
+
         if (track.getCoverPath() != null) {
-            return getCoverBytes(track)
-                    .map(coverBytes -> {
-                        String ext = getFileExtension(track.getCoverPath());
-                        String mimeType = getCoverMimeType(ext);
-                        String base64 = Base64.getEncoder().encodeToString(coverBytes);
-                        return TrackDTO.fromEntity(track, "data:" + mimeType + ";base64," + base64);
-                    });
+            return Mono.zip(
+                            artistsMono,
+                            getCoverBytes(track),
+                            (artists, coverBytes) -> {
+                                String ext = getFileExtension(track.getCoverPath());
+                                String mimeType = getCoverMimeType(ext);
+                                String base64 = Base64.getEncoder().encodeToString(coverBytes);
+                                TrackDTO dto = TrackDTO.fromEntity(track, "data:" + mimeType + ";base64," + base64);
+                                dto.setArtists(artists);
+                                return dto;
+                            }
+                    );
         }
-        return Mono.just(TrackDTO.fromEntity(track));
+
+        return artistsMono.map(artists -> {
+            baseDto.setArtists(artists);
+            return baseDto;
+        });
     }
 }

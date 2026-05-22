@@ -9,14 +9,10 @@ import reactor.core.publisher.Mono;
 
 public interface TrackRepository extends R2dbcRepository<Track, Long> {
 
-    Flux<Track> findAllBy(Pageable pageable);
+    Flux<Track> findByUserId(Long userId, Pageable pageable);
 
-    Flux<Track> findByArtist(String artist);
+    @Query("SELECT * FROM tracks WHERE user_id = :userId AND (title ILIKE :query OR artist ILIKE :query OR album ILIKE :query)")
+    Flux<Track> searchTracksByUser(Long userId, String query);
 
-    Flux<Track> findByAlbum(String album);
-
-    @Query("SELECT * FROM tracks WHERE title ILIKE :query OR artist ILIKE :query OR album ILIKE :query")
-    Flux<Track> searchTracks(String query);
-
-    Mono<Long> count();
+    Mono<Long> countByUserId(Long userId);
 }
