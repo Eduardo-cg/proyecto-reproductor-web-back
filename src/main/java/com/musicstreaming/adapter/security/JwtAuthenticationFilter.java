@@ -64,6 +64,12 @@ public class JwtAuthenticationFilter implements WebFilter {
         if (bearerToken != null && bearerToken.startsWith(BEARER_PREFIX)) {
             return bearerToken.substring(BEARER_PREFIX.length());
         }
+
+        String queryToken = exchange.getRequest().getQueryParams().getFirst("token");
+        if (queryToken != null && !queryToken.isEmpty()) {
+            return queryToken;
+        }
+
         return null;
     }
 

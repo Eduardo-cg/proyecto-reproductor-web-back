@@ -9,10 +9,12 @@ import com.musicstreaming.domain.service.AudioService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.ZeroCopyHttpOutputMessage;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,9 +24,10 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.file.Files;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,11 +39,15 @@ public class AudioController {
 
     private static final Logger log = LoggerFactory.getLogger(AudioController.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final int CHUNK_SIZE_SEQUENTIAL = 256 * 1024;
+    private static final int CHUNK_SIZE_RANDOM = 64 * 1024;
 
     private final AudioService audioService;
+    private final DataBufferFactory dataBufferFactory;
 
     public AudioController(AudioService audioService) {
         this.audioService = audioService;
+        this.dataBufferFactory = DefaultDataBufferFactory.sharedInstance;
     }
 
     @PostMapping(consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
@@ -116,51 +123,52 @@ public class AudioController {
 
         log.debug("Stream request for track {} with Range: {}", id, rangeHeader);
 
-        Flux<DataBuffer> dataBufferFlux = audioService.getTrackFilePath(id, principal.getId())
-                .flatMapMany(path -> {
-                    try {
-                        long fileSize = Files.size(path);
-                        String mimeType = Files.probeContentType(path);
-                        if (mimeType == null) {
-                            mimeType = "audio/mpeg";
-                        }
+        return audioService.getFileMetadata(id, principal.getId())
+                .flatMap(meta -> {
+                    response.getHeaders().setContentType(MediaType.parseMediaType(meta.mimeType()));
+                    response.getHeaders().add("Accept-Ranges", "bytes");
+                    response.getHeaders().add("Cache-Control", "public, max-age=3600");
 
-                        response.getHeaders().setContentType(MediaType.parseMediaType(mimeType));
-                        response.getHeaders().add("Accept-Ranges", "bytes");
-
-                        if (rangeHeader == null || rangeHeader.isEmpty()) {
-                            response.getHeaders().setContentLength(fileSize);
-                            return readFile(path, 0, fileSize - 1);
-                        }
-
-                        return parseRangeHeader(rangeHeader, fileSize)
-                                .map(range -> {
-                                    long start = range[0];
-                                    long end = range[1];
-
-                                    response.setStatusCode(HttpStatus.PARTIAL_CONTENT);
-                                    long contentLength = end - start + 1;
-                                    response.getHeaders().setContentLength(contentLength);
-                                    response.getHeaders().add("Content-Range",
-                                            "bytes " + start + "-" + end + "/" + fileSize);
-
-                                    return readFile(path, start, end);
-                                })
-                                .orElseGet(() -> {
-                                    response.setStatusCode(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE);
-                                    return Flux.<DataBuffer>empty();
+                    if (rangeHeader == null || rangeHeader.isEmpty()) {
+                        response.getHeaders().setContentLength(meta.size());
+                        return audioService.getTrackFilePath(id, principal.getId())
+                                .flatMap(path -> {
+                                    if (response instanceof ZeroCopyHttpOutputMessage zeroCopy) {
+                                        return zeroCopy.writeWith(path, 0, meta.size());
+                                    }
+                                    Flux<DataBuffer> fileFlux = readFile(path, 0, meta.size() - 1, true)
+                                            .doOnNext(buf -> log.debug("Sent {} bytes", buf.readableByteCount()));
+                                    return response.writeWith(fileFlux);
                                 });
-
-                    } catch (IOException e) {
-                        log.error("Error streaming track {}: {}", id, e.getMessage());
-                        return Flux.<DataBuffer>error(e);
                     }
-                })
-                .doOnNext(buffer -> log.debug("Sent {} bytes", buffer.readableByteCount()))
-                .doOnComplete(() -> log.info("Stream completed for track {}", id))
-                .doOnError(e -> log.error("Stream error for track {}: {}", id, e.getMessage()));
 
-        return response.writeWith(dataBufferFlux);
+                    Optional<long[]> parsed = parseRangeHeader(rangeHeader, meta.size());
+                    if (parsed.isEmpty()) {
+                        response.setStatusCode(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE);
+                        return Mono.empty();
+                    }
+
+                    long[] range = parsed.get();
+                    long start = range[0];
+                    long end = range[1];
+                    boolean sequential = (start == 0);
+
+                    response.setStatusCode(HttpStatus.PARTIAL_CONTENT);
+                    long contentLength = end - start + 1;
+                    response.getHeaders().setContentLength(contentLength);
+                    response.getHeaders().add("Content-Range",
+                            "bytes " + start + "-" + end + "/" + meta.size());
+
+                    return audioService.getTrackFilePath(id, principal.getId())
+                            .flatMap(path -> {
+                                Flux<DataBuffer> fileFlux = readFile(path, start, end, sequential)
+                                        .doOnNext(buf -> log.debug("Sent {} bytes", buf.readableByteCount()));
+                                return response.writeWith(fileFlux);
+                            });
+                })
+                .doOnSuccess(v -> log.info("Stream completed for track {}", id))
+                .doOnCancel(() -> log.info("Stream cancelled by client for track {}", id))
+                .doOnError(e -> log.error("Stream error for track {}: {}", id, e.getMessage()));
     }
 
     private List<Long> parseArtistIds(String json) {
@@ -168,51 +176,46 @@ public class AudioController {
             return new ArrayList<>();
         }
         try {
-            return objectMapper.readValue(json, new TypeReference<List<Long>>() {});
+            return objectMapper.readValue(json, new TypeReference<List<Long>>() {
+            });
         } catch (Exception e) {
             log.warn("Could not parse artistIds: {}", json);
             return new ArrayList<>();
         }
     }
 
-    private Flux<DataBuffer> readFile(Path path, long start, long end) {
-        int chunkSize = 64 * 1024;
+    private Flux<DataBuffer> readFile(Path path, long start, long end, boolean sequential) {
+        int chunkSize = sequential ? CHUNK_SIZE_SEQUENTIAL : CHUNK_SIZE_RANDOM;
 
-        return Flux.<DataBuffer, RandomAccessFile>generate(
-                        () -> {
-                            RandomAccessFile file = new RandomAccessFile(path.toFile(), "r");
-                            file.seek(start);
-                            return file;
-                        },
-                        (file, sink) -> {
+        return Flux.<DataBuffer, FileChannel>generate(
+                        () -> FileChannel.open(path, StandardOpenOption.READ).position(start),
+                        (channel, sink) -> {
                             try {
-                                long remaining = end - file.getFilePointer() + 1;
+                                long remaining = end - channel.position() + 1;
                                 if (remaining <= 0) {
                                     sink.complete();
-                                    return file;
+                                    return channel;
                                 }
                                 int readSize = (int) Math.min(chunkSize, remaining);
-                                byte[] chunk = new byte[readSize];
-                                int bytesRead = file.read(chunk);
+                                ByteBuffer bb = ByteBuffer.allocate(readSize);
+                                int bytesRead = channel.read(bb);
                                 if (bytesRead <= 0) {
                                     sink.complete();
                                 } else {
-                                    byte[] actual = bytesRead < readSize
-                                            ? java.util.Arrays.copyOf(chunk, bytesRead)
-                                            : chunk;
-                                    sink.next(DefaultDataBufferFactory.sharedInstance.wrap(actual));
-                                    if (file.getFilePointer() > end) {
+                                    bb.flip();
+                                    sink.next(dataBufferFactory.wrap(bb));
+                                    if (channel.position() > end) {
                                         sink.complete();
                                     }
                                 }
                             } catch (IOException e) {
                                 sink.error(e);
                             }
-                            return file;
+                            return channel;
                         },
-                        file -> {
+                        channel -> {
                             try {
-                                file.close();
+                                channel.close();
                             } catch (IOException ignored) {
                             }
                         })
