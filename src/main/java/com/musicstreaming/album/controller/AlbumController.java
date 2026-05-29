@@ -76,10 +76,20 @@ public class AlbumController {
     @GetMapping
     public Mono<ResponseEntity<PageResponse<AlbumDTO>>> getUserAlbums(
             @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "artistIds", required = false) List<Long> artistIds,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        return albumService.getUserAlbums(principal.getId(), page, size)
+        return albumService.getUserAlbums(principal.getId(), page, size, search, artistIds)
+                .map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/list")
+    public Mono<ResponseEntity<List<AlbumDTO>>> getUserAlbumsList(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(value = "artistIds", required = false) List<Long> artistIds) {
+        return albumService.getUserAlbumsList(principal.getId(), artistIds)
                 .map(ResponseEntity::ok);
     }
 

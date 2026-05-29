@@ -128,12 +128,50 @@ public class TrackService {
                 });
     }
 
-    public Mono<PageResponse<TrackDTO>> getUserTracks(Long userId, int page, int size) {
+    public Mono<PageResponse<TrackDTO>> getUserTracks(Long userId, int page, int size, String search, List<Long> artistIds, List<Long> albumIds) {
         Pageable pageable = PageRequest.of(page, size);
-        Mono<List<TrackDTO>> content = trackRepository.findByUserId(userId, pageable)
-                .flatMap(this::trackToDtoWithCover)
-                .collectList();
-        Mono<Long> total = trackRepository.countByUserId(userId);
+        boolean hasSearch = search != null && !search.trim().isEmpty();
+        boolean hasArtistIds = artistIds != null && !artistIds.isEmpty();
+        boolean hasAlbumIds = albumIds != null && !albumIds.isEmpty();
+        String query = hasSearch ? search.trim() : null;
+
+        Mono<List<TrackDTO>> content;
+        Mono<Long> total;
+
+        if (hasSearch && hasArtistIds && hasAlbumIds) {
+            content = trackRepository.searchByUserIdAndArtistIdsAndAlbumIds(userId, query, artistIds, albumIds, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countSearchByUserIdAndArtistIdsAndAlbumIds(userId, query, artistIds, albumIds);
+        } else if (hasSearch && hasArtistIds) {
+            content = trackRepository.searchByUserIdAndArtistIds(userId, query, artistIds, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countSearchByUserIdAndArtistIds(userId, query, artistIds);
+        } else if (hasSearch && hasAlbumIds) {
+            content = trackRepository.searchByUserIdAndAlbumIds(userId, query, albumIds, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countSearchByUserIdAndAlbumIds(userId, query, albumIds);
+        } else if (hasSearch) {
+            content = trackRepository.searchTracksByUser(userId, query, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countSearchTracksByUser(userId, query);
+        } else if (hasArtistIds && hasAlbumIds) {
+            content = trackRepository.findByUserIdAndArtistIdsAndAlbumIds(userId, artistIds, albumIds, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countByUserIdAndArtistIdsAndAlbumIds(userId, artistIds, albumIds);
+        } else if (hasArtistIds) {
+            content = trackRepository.findByUserIdAndArtistIds(userId, artistIds, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countByUserIdAndArtistIds(userId, artistIds);
+        } else if (hasAlbumIds) {
+            content = trackRepository.findByUserIdAndAlbumIds(userId, albumIds, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countByUserIdAndAlbumIds(userId, albumIds);
+        } else {
+            content = trackRepository.findByUserId(userId, pageable)
+                    .flatMap(this::trackToDtoWithCover).collectList();
+            total = trackRepository.countByUserId(userId);
+        }
+
         return Mono.zip(content, total, (tracks, totalElements) -> PageResponse.of(tracks, totalElements, page, size));
     }
 

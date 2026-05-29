@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -54,6 +55,13 @@ public class ArtistController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return artistService.getUserArtists(principal.getId(), searchQuery, page, size)
+                .map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/list")
+    public Mono<ResponseEntity<List<ArtistDTO>>> getUserArtistsList(
+            @AuthenticationPrincipal UserPrincipal principal) {
+        return artistService.getUserArtistsList(principal.getId())
                 .map(ResponseEntity::ok);
     }
 

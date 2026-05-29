@@ -21,7 +21,7 @@ public class TrackDTO {
     private Long id;
     private String title;
     private List<ArtistDTO> artists = new ArrayList<>();
-    private String artistDisplay;
+    private String artist;
     private String album;
     private Integer duration;
     private String cover;
@@ -48,11 +48,11 @@ public class TrackDTO {
     public void setArtists(List<ArtistDTO> artists) {
         this.artists = artists;
         if (artists != null && !artists.isEmpty()) {
-            this.artistDisplay = artists.stream()
+            this.artist = artists.stream()
                     .map(ArtistDTO::getName)
                     .collect(Collectors.joining(", "));
         } else {
-            this.artistDisplay = "";
+            this.artist = "";
         }
     }
 }

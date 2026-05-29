@@ -167,17 +167,50 @@ public class AlbumService {
                 .doOnSuccess(a -> log.info("Album updated: {} (id={})", a.getTitle(), a.getId()));
     }
 
-    public Mono<PageResponse<AlbumDTO>> getUserAlbums(Long userId, int page, int size) {
+    public Mono<PageResponse<AlbumDTO>> getUserAlbums(Long userId, int page, int size, String search, List<Long> artistIds) {
         Pageable pageable = PageRequest.of(page, size);
+        boolean hasSearch = search != null && !search.trim().isEmpty();
+        boolean hasArtistIds = artistIds != null && !artistIds.isEmpty();
+        String query = hasSearch ? search.trim() : null;
 
-        Mono<List<AlbumDTO>> content = albumRepository.findByUserId(userId, pageable)
-                .flatMap(this::albumToDto)
-                .collectList();
+        Mono<List<AlbumDTO>> content;
+        Mono<Long> total;
 
-        Mono<Long> total = albumRepository.countByUserId(userId);
+        if (hasSearch && hasArtistIds) {
+            content = albumRepository.searchByUserIdAndArtistIds(userId, query, artistIds, pageable)
+                    .flatMap(this::albumToDto).collectList();
+            total = albumRepository.countSearchByUserIdAndArtistIds(userId, query, artistIds);
+        } else if (hasSearch) {
+            content = albumRepository.searchAlbumsByUser(userId, query, pageable)
+                    .flatMap(this::albumToDto).collectList();
+            total = albumRepository.countSearchAlbumsByUser(userId, query);
+        } else if (hasArtistIds) {
+            content = albumRepository.findByUserIdAndArtistIds(userId, artistIds, pageable)
+                    .flatMap(this::albumToDto).collectList();
+            total = albumRepository.countByUserIdAndArtistIds(userId, artistIds);
+        } else {
+            content = albumRepository.findByUserId(userId, pageable)
+                    .flatMap(this::albumToDto).collectList();
+            total = albumRepository.countByUserId(userId);
+        }
 
         return Mono.zip(content, total,
                 (albums, totalElements) -> PageResponse.of(albums, totalElements, page, size));
+    }
+
+    public Mono<List<AlbumDTO>> getUserAlbumsList(Long userId, List<Long> artistIds) {
+        Flux<Album> albums;
+        if (artistIds != null && !artistIds.isEmpty()) {
+            albums = albumRepository.findSimpleByUserIdAndArtistIds(userId, artistIds);
+        } else {
+            albums = albumRepository.findSimpleByUserId(userId);
+        }
+        return albums.map(album -> {
+            AlbumDTO dto = new AlbumDTO();
+            dto.setId(album.getId());
+            dto.setTitle(album.getTitle());
+            return dto;
+        }).collectList();
     }
 
     public Mono<AlbumWithTracksDTO> getAlbumWithTracks(Long albumId, Long userId) {

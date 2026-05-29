@@ -93,6 +93,17 @@ public class ArtistService {
                 (artists, totalElements) -> PageResponse.of(artists, totalElements, page, size));
     }
 
+    public Mono<List<ArtistDTO>> getUserArtistsList(Long userId) {
+        return artistRepository.findSimpleByUserId(userId)
+                .map(artist -> {
+                    ArtistDTO dto = new ArtistDTO();
+                    dto.setId(artist.getId());
+                    dto.setName(artist.getName());
+                    return dto;
+                })
+                .collectList();
+    }
+
     public Mono<ArtistDTO> getArtistById(Long artistId, Long userId) {
         return artistRepository.findById(artistId)
                 .switchIfEmpty(Mono.error(new ResourceNotFoundException("Artist", artistId)))

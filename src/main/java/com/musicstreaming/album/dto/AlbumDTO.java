@@ -20,7 +20,7 @@ public class AlbumDTO {
     private Long id;
     private String title;
     private List<ArtistDTO> artists = new ArrayList<>();
-    private String artistDisplay;
+    private String artist;
     private LocalDate releaseDate;
     private String cover;
     private Long userId;
@@ -29,11 +29,11 @@ public class AlbumDTO {
     public void setArtists(List<ArtistDTO> artists) {
         this.artists = artists;
         if (artists != null && !artists.isEmpty()) {
-            this.artistDisplay = artists.stream()
+            this.artist = artists.stream()
                     .map(ArtistDTO::getName)
                     .collect(Collectors.joining(", "));
         } else {
-            this.artistDisplay = "";
+            this.artist = "";
         }
     }
 }

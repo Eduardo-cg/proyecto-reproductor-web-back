@@ -95,10 +95,13 @@ public class TrackController {
     @GetMapping
     public Mono<ResponseEntity<PageResponse<TrackDTO>>> getUserTracks(
             @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "artistIds", required = false) List<Long> artistIds,
+            @RequestParam(value = "albumIds", required = false) List<Long> albumIds,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        return trackService.getUserTracks(principal.getId(), page, size)
+        return trackService.getUserTracks(principal.getId(), page, size, search, artistIds, albumIds)
                 .map(ResponseEntity::ok);
     }
 

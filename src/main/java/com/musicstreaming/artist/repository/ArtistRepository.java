@@ -25,4 +25,7 @@ public interface ArtistRepository extends R2dbcRepository<Artist, Long> {
     Mono<Artist> findByUserIdAndName(Long userId, String name);
 
     Mono<Long> countByUserId(Long userId);
+
+    @Query("SELECT id, name FROM artists WHERE user_id = :userId ORDER BY name ASC")
+    Flux<Artist> findSimpleByUserId(Long userId);
 }
