@@ -2,27 +2,26 @@ package com.musicstreaming.auth.controller;
 
 import com.musicstreaming.auth.dto.*;
 import com.musicstreaming.auth.service.AuthService;
+import com.musicstreaming.auth.service.StorageService;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
 
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthService authService;
-
-    public AuthController(AuthService authService) {
-        this.authService = authService;
-    }
+    private final StorageService storageService;
 
     @PostMapping("/register")
     public Mono<ResponseEntity<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
@@ -39,13 +38,14 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public Mono<ResponseEntity<UserResponse>> getCurrentUser(@AuthenticationPrincipal UserDetails userDetails) {
-        if (userDetails == null) {
-            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
-        }
+    public Mono<ResponseEntity<UserResponse>> getCurrentUser(@AuthenticationPrincipal UserPrincipal principal) {
+        return authService.getCurrentUser(principal.getId())
+                .map(ResponseEntity::ok);
+    }
 
-        Long userId = Long.parseLong(((UserPrincipal) userDetails).getId().toString());
-        return authService.getCurrentUser(userId)
+    @GetMapping("/storage")
+    public Mono<ResponseEntity<StorageUsageResponse>> getStorageUsage(@AuthenticationPrincipal UserPrincipal principal) {
+        return storageService.getUsage(principal.getId())
                 .map(ResponseEntity::ok);
     }
 }

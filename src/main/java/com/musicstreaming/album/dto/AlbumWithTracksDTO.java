@@ -26,9 +26,10 @@ public class AlbumWithTracksDTO {
     private String cover;
     private Long userId;
     private int trackCount;
+    private Long totalSize;
     private List<TrackDTO> tracks;
 
-    public void setArtists(List<ArtistDTO> artists) {
+    public void setArtistsNames(List<ArtistDTO> artists) {
         this.artists = artists;
         if (artists != null && !artists.isEmpty()) {
             this.artist = artists.stream()

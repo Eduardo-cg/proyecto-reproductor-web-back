@@ -6,47 +6,22 @@ import com.musicstreaming.artist.service.ArtistService;
 import com.musicstreaming.auth.dto.UserPrincipal;
 import com.musicstreaming.common.dto.PageResponse;
 import com.musicstreaming.track.dto.TrackDTO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferFactory;
-import org.springframework.core.io.buffer.DefaultDataBufferFactory;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.ZeroCopyHttpOutputMessage;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
-
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 
 @RestController
 @RequestMapping("/api/artists")
+@RequiredArgsConstructor
 public class ArtistController {
 
-    private static final Logger log = LoggerFactory.getLogger(ArtistController.class);
-
     private final ArtistService artistService;
-
-    public ArtistController(ArtistService artistService) {
-        this.artistService = artistService;
-    }
 
     @GetMapping
     public Mono<ResponseEntity<PageResponse<ArtistDTO>>> getUserArtists(
@@ -59,9 +34,12 @@ public class ArtistController {
     }
 
     @GetMapping("/list")
-    public Mono<ResponseEntity<List<ArtistDTO>>> getUserArtistsList(
-            @AuthenticationPrincipal UserPrincipal principal) {
-        return artistService.getUserArtistsList(principal.getId())
+    public Mono<ResponseEntity<PageResponse<ArtistDTO>>> getUserArtistsList(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "10") int size) {
+        return artistService.getUserArtistsList(principal.getId(), search, page, size)
                 .map(ResponseEntity::ok);
     }
 
@@ -125,84 +103,6 @@ public class ArtistController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id,
             ServerHttpResponse response) {
-
-        return artistService.getArtistDownloadData(id, principal.getId())
-                .flatMap(data -> {
-                    if (data.entries().isEmpty()) {
-                        response.setStatusCode(HttpStatus.NO_CONTENT);
-                        return Mono.empty();
-                    }
-
-                    String zipName = data.artistName() + ".zip";
-
-                    return Mono.fromCallable(() -> {
-                                Path tempZip = Files.createTempFile("artist-", ".zip");
-                                try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(tempZip.toFile()))) {
-                                    for (ArtistService.ArtistDownloadEntry entry : data.entries()) {
-                                        Path filePath = entry.filePath();
-                                        if (Files.exists(filePath)) {
-                                            ZipEntry zipEntry = new ZipEntry(entry.zipPath().replace("\\", "/"));
-                                            zos.putNextEntry(zipEntry);
-                                            Files.copy(filePath, zos);
-                                            zos.closeEntry();
-                                        }
-                                    }
-                                }
-                                return tempZip;
-                            }).subscribeOn(Schedulers.boundedElastic())
-                            .flatMap(tempZip -> {
-                                try {
-                                    long fileSize = Files.size(tempZip);
-                                    String encoded = URLEncoder.encode(zipName, StandardCharsets.UTF_8).replace("+", "%20");
-                                    response.getHeaders().setContentType(MediaType.APPLICATION_OCTET_STREAM);
-                                    response.getHeaders().add("Content-Disposition",
-                                            "attachment; filename=\"" + zipName + "\"; filename*=UTF-8''" + encoded);
-                                    response.getHeaders().setContentLength(fileSize);
-
-                                    if (response instanceof ZeroCopyHttpOutputMessage zeroCopy) {
-                                        return zeroCopy.writeWith(tempZip, 0, fileSize)
-                                                .doFinally(s -> {
-                                                    try {
-                                                        Files.deleteIfExists(tempZip);
-                                                    } catch (IOException ignored) {
-                                                    }
-                                                });
-                                    }
-
-                                    DataBufferFactory factory = DefaultDataBufferFactory.sharedInstance;
-                                    Flux<DataBuffer> dataBufferFlux = Flux.<DataBuffer, FileChannel>generate(
-                                            () -> FileChannel.open(tempZip, StandardOpenOption.READ),
-                                            (channel, sink) -> {
-                                                try {
-                                                    ByteBuffer bb = ByteBuffer.allocate(8192);
-                                                    int bytesRead = channel.read(bb);
-                                                    if (bytesRead <= 0) {
-                                                        sink.complete();
-                                                    } else {
-                                                        bb.flip();
-                                                        sink.next(factory.wrap(bb));
-                                                    }
-                                                } catch (IOException e) {
-                                                    sink.error(e);
-                                                }
-                                                return channel;
-                                            },
-                                            channel -> {
-                                                try {
-                                                    channel.close();
-                                                } catch (IOException ignored) {
-                                                }
-                                                try {
-                                                    Files.deleteIfExists(tempZip);
-                                                } catch (IOException ignored) {
-                                                }
-                                            }
-                                    ).subscribeOn(Schedulers.boundedElastic());
-                                    return response.writeWith(dataBufferFlux);
-                                } catch (IOException e) {
-                                    return Mono.error(e);
-                                }
-                            });
-                });
+        return artistService.downloadArtist(id, principal.getId(), response);
     }
 }

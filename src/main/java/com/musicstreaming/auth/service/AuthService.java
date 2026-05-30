@@ -4,7 +4,9 @@ import com.musicstreaming.auth.dto.LoginResponse;
 import com.musicstreaming.auth.dto.RegisterRequest;
 import com.musicstreaming.auth.dto.UserPrincipal;
 import com.musicstreaming.auth.dto.UserResponse;
+import com.musicstreaming.auth.entity.Role;
 import com.musicstreaming.auth.entity.User;
+import com.musicstreaming.auth.repository.RoleRepository;
 import com.musicstreaming.auth.repository.UserRepository;
 import com.musicstreaming.common.exception.ResourceAlreadyExistsException;
 import com.musicstreaming.common.exception.ResourceNotFoundException;
@@ -23,6 +25,7 @@ public class AuthService {
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
 
@@ -30,34 +33,39 @@ public class AuthService {
     private long jwtExpiration;
 
     public AuthService(UserRepository userRepository,
+                       RoleRepository roleRepository,
                        PasswordEncoder passwordEncoder,
                        JwtTokenProvider jwtTokenProvider) {
         this.userRepository = userRepository;
+        this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
     }
 
     public Mono<UserResponse> register(RegisterRequest request) {
-        return userRepository.existsByUsername(request.getUsername())
-                .flatMap(exists -> {
-                    if (exists) {
-                        return Mono.error(new ResourceAlreadyExistsException("Username already exists"));
-                    }
-                    return userRepository.existsByEmail(request.getEmail());
-                })
-                .flatMap(exists -> {
-                    if (exists) {
-                        return Mono.error(new ResourceAlreadyExistsException("Email already exists"));
-                    }
-                    User user = new User(
-                            request.getUsername(),
-                            request.getEmail(),
-                            passwordEncoder.encode(request.getPassword())
-                    );
-                    return userRepository.save(user);
-                })
-                .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail()))
-                .doOnSuccess(u -> log.info("User registered: {}", u.getUsername()));
+        return roleRepository.findByName("STANDARD")
+                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Role", "STANDARD")))
+                .flatMap(role -> userRepository.existsByUsername(request.getUsername())
+                        .flatMap(exists -> {
+                            if (exists) {
+                                return Mono.error(new ResourceAlreadyExistsException("Username already exists"));
+                            }
+                            return userRepository.existsByEmail(request.getEmail());
+                        })
+                        .flatMap(exists -> {
+                            if (exists) {
+                                return Mono.error(new ResourceAlreadyExistsException("Email already exists"));
+                            }
+                            User user = new User(
+                                    request.getUsername(),
+                                    request.getEmail(),
+                                    passwordEncoder.encode(request.getPassword())
+                            );
+                            user.setRoleId(role.getId());
+                            return userRepository.save(user);
+                        })
+                        .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), "STANDARD"))
+                        .doOnSuccess(u -> log.info("User registered: {}", u.getUsername())));
     }
 
     public Mono<LoginResponse> login(String username, String password) {
@@ -67,21 +75,25 @@ public class AuthService {
                     if (!passwordEncoder.matches(password, user.getPasswordHash())) {
                         return Mono.error(new UnauthorizedException("Invalid username or password"));
                     }
-                    UserPrincipal userPrincipal = new UserPrincipal(
-                            user.getId(),
-                            user.getUsername(),
-                            user.getEmail(),
-                            user.getPasswordHash()
-                    );
-                    String token = jwtTokenProvider.generateToken(userPrincipal);
+                    return roleRepository.findById(user.getRoleId())
+                            .map(role -> {
+                                UserPrincipal userPrincipal = new UserPrincipal(
+                                        user.getId(),
+                                        user.getUsername(),
+                                        user.getEmail(),
+                                        user.getPasswordHash()
+                                );
+                                String token = jwtTokenProvider.generateToken(userPrincipal);
 
-                    LoginResponse.UserInfo userInfo = new LoginResponse.UserInfo(
-                            user.getId(),
-                            user.getUsername(),
-                            user.getEmail()
-                    );
+                                LoginResponse.UserInfo userInfo = new LoginResponse.UserInfo(
+                                        user.getId(),
+                                        user.getUsername(),
+                                        user.getEmail(),
+                                        role.getName()
+                                );
 
-                    return Mono.just(new LoginResponse(token, jwtExpiration, userInfo));
+                                return new LoginResponse(token, jwtExpiration, userInfo);
+                            });
                 })
                 .doOnSuccess(r -> log.info("User logged in: {}", username));
     }
@@ -89,6 +101,7 @@ public class AuthService {
     public Mono<UserResponse> getCurrentUser(Long userId) {
         return userRepository.findById(userId)
                 .switchIfEmpty(Mono.error(new ResourceNotFoundException("User", userId)))
-                .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail()));
+                .flatMap(user -> roleRepository.findById(user.getRoleId())
+                        .map(role -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), role.getName())));
     }
 }

@@ -31,6 +31,9 @@ public class Track {
     @Column("file_path")
     private String filePath;
 
+    @Column("file_size")
+    private Long fileSize;
+
     @Column("cover_path")
     private String coverPath;
 

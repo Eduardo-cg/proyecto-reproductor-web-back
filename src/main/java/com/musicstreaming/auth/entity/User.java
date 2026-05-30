@@ -27,6 +27,9 @@ public class User {
     @Column("password_hash")
     private String passwordHash;
 
+    @Column("role_id")
+    private Long roleId;
+
     @Column("created_at")
     private LocalDateTime createdAt;
 

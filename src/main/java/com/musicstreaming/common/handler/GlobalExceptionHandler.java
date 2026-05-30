@@ -2,6 +2,7 @@ package com.musicstreaming.common.handler;
 
 import com.musicstreaming.common.exception.ResourceAlreadyExistsException;
 import com.musicstreaming.common.exception.ResourceNotFoundException;
+import com.musicstreaming.common.exception.StorageLimitExceededException;
 import com.musicstreaming.common.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +37,12 @@ public class GlobalExceptionHandler {
                 .body(Map.of("error", ex.getMessage())));
     }
 
+    @ExceptionHandler(StorageLimitExceededException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleStorageLimit(StorageLimitExceededException ex) {
+        return Mono.just(ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(Map.of("error", ex.getMessage())));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public Mono<ResponseEntity<Map<String, String>>> handleBadRequest(IllegalArgumentException ex) {
         return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -45,17 +52,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RuntimeException.class)
     public Mono<ResponseEntity<Map<String, String>>> handleRuntimeException(RuntimeException ex) {
         log.error("Runtime exception: {}", ex.getMessage());
-
-        String message = ex.getMessage();
-        HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
-
-        if (message != null && (message.contains("Invalid") || message.contains("Access denied"))) {
-            status = HttpStatus.UNAUTHORIZED;
-        }
-
-
-        return Mono.just(ResponseEntity.status(status)
-                .body(Map.of("error", message)));
+        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Internal server error")));
     }
 
     @ExceptionHandler(Exception.class)

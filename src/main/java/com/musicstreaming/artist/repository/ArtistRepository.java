@@ -9,23 +9,16 @@ import reactor.core.publisher.Mono;
 
 public interface ArtistRepository extends R2dbcRepository<Artist, Long> {
 
-    Flux<Artist> findByUserId(Long userId);
-
     Flux<Artist> findByUserId(Long userId, Pageable pageable);
 
-    @Query("SELECT * FROM artists WHERE user_id = :userId AND LOWER(name) LIKE LOWER(CONCAT('%', :query, '%'))")
-    Flux<Artist> searchByUserId(Long userId, String query);
-
-    @Query("SELECT * FROM artists WHERE user_id = :userId AND LOWER(name) LIKE LOWER(CONCAT('%', :query, '%'))")
+    @Query("SELECT * FROM artists WHERE user_id = :userId AND unaccent(name) ILIKE '%' || unaccent(:query) || '%'")
     Flux<Artist> searchByUserId(Long userId, String query, Pageable pageable);
 
-    @Query("SELECT COUNT(*) FROM artists WHERE user_id = :userId AND LOWER(name) LIKE LOWER(CONCAT('%', :query, '%'))")
+    @Query("SELECT COUNT(*) FROM artists WHERE user_id = :userId AND unaccent(name) ILIKE '%' || unaccent(:query) || '%'")
     Mono<Long> countByUserIdAndSearch(Long userId, String query);
 
     Mono<Artist> findByUserIdAndName(Long userId, String name);
 
     Mono<Long> countByUserId(Long userId);
 
-    @Query("SELECT id, name FROM artists WHERE user_id = :userId ORDER BY name ASC")
-    Flux<Artist> findSimpleByUserId(Long userId);
 }

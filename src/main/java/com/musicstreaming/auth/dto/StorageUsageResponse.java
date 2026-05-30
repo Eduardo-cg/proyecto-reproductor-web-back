@@ -9,10 +9,10 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class UserResponse {
+public class StorageUsageResponse {
 
-    private Long id;
-    private String username;
-    private String email;
+    private Long usedBytes;
+    private Long limitBytes;
+    private Long availableBytes;
     private String roleName;
 }

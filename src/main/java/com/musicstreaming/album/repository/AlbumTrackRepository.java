@@ -16,8 +16,6 @@ public interface AlbumTrackRepository extends R2dbcRepository<AlbumTrack, Long> 
 
     Mono<Void> deleteByAlbumIdAndTrackId(Long albumId, Long trackId);
 
-    Mono<AlbumTrack> findByAlbumIdAndTrackId(Long albumId, Long trackId);
-
     @Query("SELECT track_id FROM album_tracks")
     Flux<Long> findAllTrackIds();
 }

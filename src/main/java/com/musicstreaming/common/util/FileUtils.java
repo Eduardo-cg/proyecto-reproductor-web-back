@@ -3,6 +3,7 @@ package com.musicstreaming.common.util;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.tika.Tika;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -15,7 +16,7 @@ public final class FileUtils {
 
     public static String getExtension(String filename) {
         String ext = FilenameUtils.getExtension(filename);
-        return ext != null && !ext.isEmpty() ? ext.toLowerCase() : "jpg";
+        return ext != null && !ext.isEmpty() ? ext.toLowerCase() : "bin";
     }
 
     public static String getMimeType(String filename) {
@@ -37,23 +38,23 @@ public final class FileUtils {
         };
     }
 
-    public static byte[] readAllBytes(Path path) throws java.io.IOException {
+    public static byte[] readAllBytes(Path path) throws IOException {
         return Files.readAllBytes(path);
     }
 
-    public static void createDirectories(Path path) throws java.io.IOException {
+    public static void createDirectories(Path path) throws IOException {
         Files.createDirectories(path);
     }
 
-    public static void deleteIfExists(Path path) throws java.io.IOException {
+    public static void deleteIfExists(Path path) throws IOException {
         Files.deleteIfExists(path);
     }
 
-    public static long size(Path path) throws java.io.IOException {
+    public static long size(Path path) throws IOException {
         return Files.size(path);
     }
 
-    public static String probeContentType(Path path) throws java.io.IOException {
+    public static String probeContentType(Path path) throws IOException {
         return Files.probeContentType(path);
     }
 }
