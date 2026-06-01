@@ -23,6 +23,7 @@ import reactor.core.publisher.Mono;
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+    private static final String STANDARD_ROLE_NAME = "STANDARD";
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -43,8 +44,8 @@ public class AuthService {
     }
 
     public Mono<UserResponse> register(RegisterRequest request) {
-        return roleRepository.findByName("STANDARD")
-                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Role", "STANDARD")))
+        return roleRepository.findByName(STANDARD_ROLE_NAME)
+                .switchIfEmpty(Mono.error(new ResourceNotFoundException("Role", STANDARD_ROLE_NAME)))
                 .flatMap(role -> userRepository.existsByUsername(request.getUsername())
                         .flatMap(exists -> {
                             if (exists) {
@@ -64,8 +65,8 @@ public class AuthService {
                             user.setRoleId(role.getId());
                             return userRepository.save(user);
                         })
-                        .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), "STANDARD"))
-                        .doOnSuccess(u -> log.info("User registered: {}", u.getUsername())));
+                        .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), STANDARD_ROLE_NAME))
+                        .doOnSuccess(u -> log.info("User registered userId={} username={}", u.getId(), u.getUsername())));
     }
 
     public Mono<LoginResponse> login(String username, String password) {
@@ -95,7 +96,7 @@ public class AuthService {
                                 return new LoginResponse(token, jwtExpiration, userInfo);
                             });
                 })
-                .doOnSuccess(r -> log.info("User logged in: {}", username));
+                .doOnSuccess(r -> log.info("User logged in userId={} username={}", r.getUser().getId(), username));
     }
 
     public Mono<UserResponse> getCurrentUser(Long userId) {

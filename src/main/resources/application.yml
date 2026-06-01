@@ -1,51 +1,95 @@
 server:
   port: 8080
+  shutdown: graceful
 
 spring:
   application:
-    name: music-streaming-backend
+    name: ${app.name:FonoPort}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
   r2dbc:
     url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:musicdb}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
     pool:
+      initial-size: 5
       max-size: 20
       max-idle-time: 30s
+      max-life-time: 1800s
+      validation-query: SELECT 1
 
   default:
     charset: UTF-8
 
-  servlet:
-    multipart:
-      max-file-size: 500MB
-      max-request-size: 500MB
-
 app:
   jwt:
     secret: ${JWT_SECRET:your-256-bit-secret-key-here-must-be-at-least-32-characters-long}
-    expiration: 86400000  # 24 hours in ms
+    expiration: 86400000
 
   storage:
     base-path: ${STORAGE_PATH:/data/audio}
-    max-file-size: 524288000  # 500MB
+    max-file-size: 524288000
 
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000,http://localhost:8081}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+  cache:
+    artist-image:
+      max-size: 300
+      ttl: 1h
+    track-cover:
+      max-size: 500
+      ttl: 1h
+    album-cover:
+      max-size: 200
+      ttl: 1h
+    artist-track-cover:
+      max-size: 300
+      ttl: 1h
+    file-metadata:
+      max-size: 2000
+      ttl: 1h
+
+  security:
+    rate-limit:
+      login-limit: 10
+      register-limit: 5
+      window-ms: 60000
 
 management:
+  server:
+    port: 8081
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: always
+      probes:
+        enabled: true
+    info:
+      enabled: true
+  health:
+    r2dbc:
+      enabled: true
+    db:
+      enabled: true
+  info:
+    java:
+      enabled: true
+    env:
+      enabled: true
   metrics:
     tags:
       application: ${spring.application.name}
 
 logging:
   level:
-    com.musicstreaming: DEBUG
-    org.springframework.security: DEBUG
-    reactor.netty: DEBUG
+    com.musicstreaming: INFO
+    org.springframework.security: WARN
+    reactor.netty: WARN

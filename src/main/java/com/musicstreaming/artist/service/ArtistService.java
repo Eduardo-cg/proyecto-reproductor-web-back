@@ -137,7 +137,7 @@ public class ArtistService {
                 }))
                 .cast(Artist.class)
                 .flatMap(this::artistToDto)
-                .doOnSuccess(a -> log.info("Artist created: {} by user {}", a.getName(), userId));
+                .doOnSuccess(a -> log.info("Artist created userId={} artistId={} name={}", userId, a.getId(), a.getName()));
     }
 
     public Mono<ArtistDTO> updateArtist(Long artistId, String name, FilePart image, Long userId) {
@@ -152,7 +152,7 @@ public class ArtistService {
                     return artistRepository.save(artist);
                 })
                 .flatMap(this::artistToDto)
-                .doOnSuccess(a -> log.info("Artist updated: {} by user {}", a.getName(), userId));
+                .doOnSuccess(a -> log.info("Artist updated userId={} artistId={} name={}", userId, a.getId(), a.getName()));
     }
 
     public Mono<Void> deleteArtist(Long artistId, Long userId) {
@@ -166,7 +166,7 @@ public class ArtistService {
                                 .then(cleanupArtistImage(artist))
                                 .then(artistRepository.deleteById(artistId))
                 )
-                .doOnSuccess(v -> log.info("Artist cascade deleted: {} by user {}", artistId, userId));
+                .doOnSuccess(v -> log.info("Artist cascade deleted userId={} artistId={}", userId, artistId));
     }
 
     private Mono<Void> cleanupArtistImage(Artist artist) {
@@ -175,7 +175,8 @@ public class ArtistService {
                 Path imgPath = reactiveFileService.resolvePath(artist.getImagePath());
                 try {
                     FileUtils.deleteIfExists(imgPath);
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    log.warn("Failed to delete artist image for artist {}: {}", artist.getId(), e.getMessage());
                 }
                 artistImageCache.invalidate(artist.getId());
             }
@@ -231,7 +232,8 @@ public class ArtistService {
             Path path = reactiveFileService.resolvePath(coverPath);
             try {
                 FileUtils.deleteIfExists(path);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warn("Failed to delete orphaned cover for track {}: {}", trackId, e.getMessage());
             }
         }).subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()).then();
     }

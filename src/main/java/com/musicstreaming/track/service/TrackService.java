@@ -101,7 +101,7 @@ public class TrackService {
                             })
                             .flatMap(track -> artistLinkService.saveTrackArtists(track.getId(), artistIds).thenReturn(track))
                             .flatMap(this::trackToDtoWithCover)
-                            .doOnSuccess(t -> log.info("Track uploaded: {} with {} artists", t.getTitle(), t.getArtists().size()));
+                            .doOnSuccess(t -> log.info("Track uploaded userId={} title={} artists={}", userId, t.getTitle(), t.getArtists().size()));
                 });
     }
 
@@ -163,7 +163,7 @@ public class TrackService {
                     });
                 })
                 .flatMap(this::trackToDtoWithCover)
-                .doOnSuccess(t -> log.info("Track updated: {} (id={})", t.getTitle(), t.getId()));
+                .doOnSuccess(t -> log.info("Track updated userId={} title={} id={}", userId, t.getTitle(), t.getId()));
     }
 
     public Mono<Void> deleteTrack(Long trackId, Long userId) {
@@ -179,7 +179,7 @@ public class TrackService {
                 .doOnSuccess(v -> {
                     fileMetadataCache.invalidate(trackId);
                     trackCoverCache.invalidate(trackId);
-                    log.info("Track deleted: {}", trackId);
+                    log.info("Track deleted userId={} trackId={}", userId, trackId);
                 });
     }
 
@@ -197,8 +197,8 @@ public class TrackService {
                             }
                             return response.writeWith(reactiveFileService.readFile(path, 0, fileSize - 1, true));
                         }))
-                .doOnSuccess(v -> log.info("Download completed for track {}", trackId))
-                .doOnError(e -> log.error("Download error for track {}: {}", trackId, e.getMessage()));
+                .doOnSuccess(v -> log.info("Download completed userId={} trackId={}", userId, trackId))
+                .doOnError(e -> log.error("Download error userId={} trackId={} reason={}", userId, trackId, e.getMessage()));
     }
 
     public Mono<Void> streamTrack(Long trackId, Long userId, String rangeHeader, ServerHttpResponse response) {
@@ -223,9 +223,9 @@ public class TrackService {
                     long[] range = parsed.get();
                     return streamPartialContent(trackId, range[0], range[1], meta.size(), response);
                 })
-                .doOnSuccess(v -> log.info("Stream completed for track {}", trackId))
-                .doOnCancel(() -> log.info("Stream cancelled by client for track {}", trackId))
-                .doOnError(e -> log.error("Stream error for track {}: {}", trackId, e.getMessage()));
+                .doOnSuccess(v -> log.info("Stream completed userId={} trackId={}", userId, trackId))
+                .doOnCancel(() -> log.info("Stream cancelled by client userId={} trackId={}", userId, trackId))
+                .doOnError(e -> log.error("Stream error userId={} trackId={} reason={}", userId, trackId, e.getMessage()));
     }
 
     private Mono<Void> streamFullContent(Long trackId, long size, ServerHttpResponse response) {

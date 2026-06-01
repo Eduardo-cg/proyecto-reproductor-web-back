@@ -1,35 +1,82 @@
-# Music Streaming Backend
+# FonoPort - Backend
 
-Backend reactivo para plataforma de streaming de música estilo Spotify. Construido con Spring WebFlux, R2DBC y PostgreSQL, siguiendo arquitectura hexagonal.
+Backend reactivo para plataforma de streaming de música estilo Spotify. Construido con Spring WebFlux, R2DBC y PostgreSQL, siguiendo arquitectura hexagonal por bounded contexts.
 
-## Stack
+## Características
 
-- **Java 21** con Virtual Threads
-- **Spring Boot 3.4.x** con **WebFlux** (Netty)
-- **Spring Data R2DBC** + **PostgreSQL 16**
-- **Spring Security WebFlux** + **JWT** (HS256) autenticación embebida
-- **Caffeine** caché en memoria (cover images)
-- **Resilience4j** circuit breaker
-- **Micrometer** + **Prometheus** métricas
-- **Docker Compose** para PostgreSQL
-- **Lombok**, **Jakarta Validation**, **Jackson**
+- **Streaming de audio con Range requests** - Soporte completo para HTTP Range (206 Partial Content) con lectura por chunks (64KB random, 256KB secuencial)
+- **Carga multipart** - Subida de archivos de audio (hasta 500MB), portadas de tracks/álbumes e imágenes de artistas
+- **Procesamiento de imágenes** - Redimensionamiento automático de portadas con Caffeine cache (TTL 1h)
+- **Descarga ZIP** - Álbumes y artistas descargables como archivos ZIP con estructura de carpetas
+- **Gestión de almacenamiento** - Límites por rol con tracking de uso; ADMIN sin límite, STANDARD con 512MB
+- **Búsqueda sin acentos** - Extensión PostgreSQL `unaccent()` para buscar "cafe" y encontrar "café"
+- **Filtrado y ordenamiento avanzado** - Tracks y álbumes soportan búsqueda por texto, filtrado por artista/álbum, y sorting por título, artista, año o duración
+- **Rate limiting** - Implementación custom en endpoints de login (10/min) y registro (5/min) por IP
+- **Autenticación JWT** - Tokens HS256 con expiración de 24 horas
+- **Aislamiento de datos** - Todas las queries filtran por `user_id`; `OwnershipValidator` protege recursos
+- **Health monitoring** - `StorageHealthIndicator` verifica espacio en disco + Actuator en puerto 8081
+- **Apagado graceful** - Timeout de 30 segundos para cierre ordenado
+
+## Stack Tecnológico
+
+| Categoría | Tecnología | Versión |
+|---|---|---|
+| Lenguaje | Java | 21 (Virtual Threads) |
+| Framework | Spring Boot | 3.4.0 |
+| Web | Spring WebFlux (Netty) | Reactivo (non-blocking) |
+| Base de datos | PostgreSQL | 16 |
+| Driver DB | R2DBC + r2dbc-postgresql | Reactivo |
+| Seguridad | Spring Security WebFlux | Filtro reactivo |
+| Auth | JWT (JJWT) | 0.12.5 (HS256) |
+| Caché | Caffeine + Spring Cache | In-memory, 1h TTL |
+| Resiliencia | Custom Rate Limiter | ConcurrentHashMap + sliding window |
+| Métricas | Spring Actuator + Micrometer + Prometheus | Metrics/health |
+| Build | Maven | 3.9+ |
+| Validación | Jakarta Validation | Spring Boot starter |
+| Boilerplate | Lombok | Reducción de código |
+| Procesamiento archivos | Apache Tika 2.9.2 + Commons IO 2.16.1 | MIME detection |
+| Containerización | Docker + Docker Compose | Multi-stage build |
 
 ## Arquitectura
 
-Hexagonal (puertos & adaptadores):
+Hexagonal por bounded contexts:
 
 ```
 src/main/java/com/musicstreaming/
-├── Application.java                     # Entry point
-├── config/                              # Config (seguridad, caché)
-├── domain/
-│   ├── model/                           # Entidades: User, Track, Album, Artist
-│   ├── repository/                      # Repositorios R2DBC
-│   └── service/                         # Lógica de negocio (Auth, Audio, Album, Artist)
-└── adapter/
-    ├── controller/                      # REST controllers + GlobalExceptionHandler
-    ├── dto/                             # Request/Response DTOs
-    └── security/                        # JWT, filtros, UserDetails
+├── Application.java                         # Entry point (@EnableR2dbcRepositories)
+├── auth/                                    # Auth bounded context
+│   ├── controller/AuthController.java       # Registro, login, usuario actual, storage
+│   ├── dto/                                 # RegisterRequest, LoginRequest, LoginResponse, UserResponse, UserPrincipal, StorageUsageResponse
+│   ├── entity/                              # User, Role
+│   ├── repository/                          # UserRepository, RoleRepository (R2DBC)
+│   └── service/                             # AuthService, StorageService
+├── track/                                   # Track bounded context
+│   ├── controller/TrackController.java      # CRUD, stream, download tracks
+│   ├── dto/TrackDTO.java
+│   ├── entity/                              # Track, TrackArtist
+│   ├── repository/                          # TrackRepository, TrackArtistRepository
+│   └── service/TrackService.java
+├── album/                                   # Album bounded context
+│   ├── controller/AlbumController.java      # CRUD albums, agregar/quitar/reordenar tracks, download
+│   ├── dto/                                 # AlbumDTO, AlbumWithTracksDTO
+│   ├── entity/                              # Album, AlbumTrack, AlbumArtist
+│   ├── repository/                          # AlbumRepository, AlbumTrackRepository, AlbumArtistRepository
+│   └── service/AlbumService.java
+├── artist/                                  # Artist bounded context
+│   ├── controller/ArtistController.java     # CRUD artistas, tracks/albums, download
+│   ├── dto/ArtistDTO.java
+│   ├── entity/Artist.java
+│   ├── repository/ArtistRepository.java
+│   └── service/                             # ArtistService, ArtistLinkService
+└── common/                                  # Infraestructura compartida
+    ├── cache/                               # CacheConfig, CoverService (Caffeine)
+    ├── config/                              # SecurityConfig, RateLimitConfig, JwtSecretValidator, StorageHealthIndicator
+    ├── dto/PageResponse.java                # Respuesta paginada genérica
+    ├── exception/                           # ResourceNotFoundException, ResourceAlreadyExistsException, UnauthorizedException, StorageLimitExceededException
+    ├── handler/GlobalExceptionHandler.java  # @RestControllerAdvice
+    ├── security/                            # JwtTokenProvider, JwtAuthenticationFilter, ReactiveUserDetailsServiceImpl
+    ├── service/                             # ReactiveFileService, ZipDownloadService
+    └── util/                                # FileUtils, ImageUtils, RangeHeaderParser, OwnershipValidator, SortHelper, JsonParamParser, ParserUtils, ResponseHeaderHelper
 ```
 
 ## Prerrequisitos
@@ -38,19 +85,19 @@ src/main/java/com/musicstreaming/
 - Docker (para PostgreSQL)
 - Maven 3.9+
 
-## Quick Start
+## Inicio Rápido
 
 ### 1. Arrancar PostgreSQL
 
-```bash
-docker-compose up -d
-```
+Desde la raíz del proyecto (`ProyectoDAW/`):
 
-Crea automáticamente la base de datos `musicdb` y ejecuta `schema.sql`.
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
 
 ### 2. Configurar almacenamiento
 
-Por defecto los audios se guardan en `C:/temp/music-storage`. Creá la carpeta:
+En perfil `dev`, por defecto los audios se guardan en `C:/temp/music-storage`. En `prod` la ruta es `/var/music/audio`. Creá la carpeta según tu perfil:
 
 ```bash
 mkdir C:/temp/music-storage
@@ -76,75 +123,235 @@ Activa el perfil `dev` por defecto. Para producción:
 mvn spring-boot:run -Dspring-boot.run.profiles=prod
 ```
 
-## Endpoints
+La aplicación queda disponible en `http://localhost:8080`.
 
-### Auth
+## Endpoints API
 
-| Método | Path | Descripción |
-|--------|------|-------------|
-| POST | `/api/auth/register` | Registrarse |
-| POST | `/api/auth/login` | Login (devuelve JWT) |
-| GET | `/api/auth/me` | Usuario actual |
+### Autenticación (`/api/auth`)
 
-### Tracks
+Públicos excepto `/me` y `/storage`.
+
+| Método | Path | Descripción | Auth | Rate Limit |
+|--------|------|-------------|------|------------|
+| POST | `/api/auth/register` | Registrar usuario nuevo | No | 5 req/min |
+| POST | `/api/auth/login` | Login, devuelve JWT | No | 10 req/min |
+| GET | `/api/auth/me` | Usuario actual autenticado | Sí | - |
+| GET | `/api/auth/storage` | Uso de almacenamiento (used/total/available) | Sí | - |
+
+**Request body - Registro:**
+
+```json
+{
+  "username": "juan",
+  "email": "juan@example.com",
+  "password": "secreto123"
+}
+```
+
+**Request body - Login:**
+
+```json
+{
+  "username": "juan",
+  "password": "secreto123"
+}
+```
+
+**Response - Login:**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "tokenType": "Bearer",
+  "expiresIn": 86400000,
+  "user": {
+    "id": 1,
+    "username": "juan",
+    "email": "juan@example.com",
+    "roleName": "STANDARD"
+  }
+}
+```
+
+### Tracks (`/api/tracks`)
+
+Requiere autenticación.
 
 | Método | Path | Descripción |
 |--------|------|-------------|
 | POST | `/api/tracks` | Subir track (multipart) |
-| GET | `/api/tracks` | Listar tracks (paginado) |
-| GET | `/api/tracks/{id}` | Metadata del track |
-| GET | `/api/tracks/{id}/stream` | Streaming con soporte Range (206) |
-| DELETE | `/api/tracks/{id}` | Eliminar track |
+| GET | `/api/tracks` | Listar tracks (paginado, con filtros) |
 | GET | `/api/tracks/count` | Cantidad total de tracks |
+| GET | `/api/tracks/{id}` | Metadata del track |
+| PUT | `/api/tracks/{id}` | Actualizar track (multipart) |
+| DELETE | `/api/tracks/{id}` | Eliminar track |
+| GET | `/api/tracks/{id}/stream` | Streaming con soporte Range (206) |
+| GET | `/api/tracks/{id}/download` | Descargar archivo de audio |
 
-### Albums
+**GET `/api/tracks` - Parámetros de query:**
+
+| Parámetro | Tipo | Default | Descripción |
+|-----------|------|---------|-------------|
+| `search` | String | - | Buscar por título |
+| `artistIds` | List\<Long\> | - | Filtrar por IDs de artistas |
+| `albumIds` | List\<Long\> | - | Filtrar por IDs de álbumes |
+| `page` | int | 0 | Página (0-indexed) |
+| `size` | int | 20 | Tamaño de página |
+| `sortBy` | String | `"title"` | Campo de ordenamiento |
+| `sortDirection` | String | `"asc"` | Dirección (`asc`/`desc`) |
+
+**POST `/api/tracks` - Campos multipart:**
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `title` | String | Sí | Título del track |
+| `file` | FilePart | Sí | Archivo de audio |
+| `duration` | String | Sí | Duración en segundos |
+| `cover` | FilePart | No | Imagen de portada |
+| `artistIds` | String (JSON) | No | Array JSON de IDs de artistas (ej: `"[1,2]"`) |
+| `album` | String | No | Nombre del álbum |
+| `releaseDate` | String | No | Fecha de lanzamiento |
+
+### Albums (`/api/albums`)
+
+Requiere autenticación.
 
 | Método | Path | Descripción |
 |--------|------|-------------|
 | POST | `/api/albums` | Crear álbum (multipart) |
-| GET | `/api/albums` | Listar álbumes (paginado) |
+| GET | `/api/albums` | Listar álbumes (paginado, con filtros) |
+| GET | `/api/albums/list` | Listado simplificado (para selectores) |
 | GET | `/api/albums/{id}` | Detalle del álbum con sus tracks |
+| PUT | `/api/albums/{id}` | Actualizar álbum (multipart) |
 | DELETE | `/api/albums/{id}` | Eliminar álbum (cascada) |
 | POST | `/api/albums/{id}/tracks` | Agregar track al álbum (multipart) |
+| DELETE | `/api/albums/{id}/tracks/{trackId}` | Quitar track del álbum |
+| PUT | `/api/albums/{id}/tracks/reorder` | Reordenar tracks (JSON body) |
+| GET | `/api/albums/{id}/download` | Descargar álbum como ZIP |
 
-### Artists
+**GET `/api/albums` - Parámetros de query:**
 
-| Método | Path | Descripción |
-|--------|------|-------------|
-| GET | `/api/artists` | Listar artistas (búsqueda con `?search=`) |
-| GET | `/api/artists/{id}` | Detalle del artista |
-| POST | `/api/artists` | Crear artista (multipart) |
-| PUT | `/api/artists/{id}` | Actualizar artista (multipart) |
-| DELETE | `/api/artists/{id}` | Eliminar artista |
+| Parámetro | Tipo | Default | Descripción |
+|-----------|------|---------|-------------|
+| `search` | String | - | Buscar por título |
+| `artistIds` | List\<Long\> | - | Filtrar por IDs de artistas |
+| `page` | int | 0 | Página (0-indexed) |
+| `size` | int | 20 | Tamaño de página |
+| `sortBy` | String | `"title"` | Campo de ordenamiento |
+| `sortDirection` | String | `"asc"` | Dirección (`asc`/`desc`) |
 
-### Actuator
+**POST `/api/albums` - Campos multipart:**
 
-| Método | Path | Descripción |
-|--------|------|-------------|
-| GET | `/actuator/health` | Health check |
-| GET | `/actuator/prometheus` | Métricas Prometheus |
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `title` | String | Sí | Título del álbum |
+| `artistIds` | String (JSON) | No | Array JSON de IDs de artistas |
+| `releaseDate` | String | No | Fecha de lanzamiento |
+| `cover` | FilePart | No | Imagen de portada |
 
-## Modelo de datos
+**POST `/api/albums/{id}/tracks` - Campos multipart:**
 
-```sql
-users           (id, username, email, password_hash, created_at, updated_at)
-tracks          (id, title, duration, file_path, file_size, mime_type, cover_path, user_id, created_at, updated_at)
-albums          (id, title, release_date, cover_path, user_id, created_at, updated_at)
-artists         (id, name, image_path, user_id, created_at, updated_at)
-album_tracks    (id, album_id, track_id, position)
-track_artists   (id, track_id, artist_id, position)
-album_artists   (id, album_id, artist_id, position)
-playback_history (id, user_id, track_id, played_at, progress)
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `title` | String | Sí | Título del track |
+| `file` | FilePart | Sí | Archivo de audio |
+| `duration` | String | Sí | Duración en segundos |
+| `artistIds` | String (JSON) | No | Array JSON de IDs de artistas |
+| `position` | String | No | Posición/orden en el álbum |
+| `releaseDate` | String | No | Fecha de lanzamiento |
+
+**PUT `/api/albums/{id}/tracks/reorder` - Request body:**
+
+```json
+[3, 1, 2]
 ```
 
-## Streaming de audio
+### Artists (`/api/artists`)
+
+Requiere autenticación.
+
+| Método | Path | Descripción |
+|--------|------|-------------|
+| POST | `/api/artists` | Crear artista (multipart) |
+| GET | `/api/artists` | Listar artistas (paginado, con búsqueda) |
+| GET | `/api/artists/list` | Listado simplificado (para selectores) |
+| GET | `/api/artists/{id}` | Detalle del artista |
+| PUT | `/api/artists/{id}` | Actualizar artista (multipart) |
+| DELETE | `/api/artists/{id}` | Eliminar artista |
+| GET | `/api/artists/{id}/tracks` | Tracks del artista (paginado) |
+| GET | `/api/artists/{id}/albums` | Albums del artista (paginado) |
+| GET | `/api/artists/{id}/download` | Descargar tracks del artista como ZIP |
+
+**GET `/api/artists` - Parámetros de query:**
+
+| Parámetro | Tipo | Default | Descripción |
+|-----------|------|---------|-------------|
+| `search` | String | - | Buscar por nombre |
+| `page` | int | 0 | Página (0-indexed) |
+| `size` | int | 20 | Tamaño de página |
+
+**POST `/api/artists` - Campos multipart:**
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `name` | String | Sí | Nombre del artista |
+| `image` | FilePart | No | Imagen del artista |
+
+### Actuator (Puerto 8081)
+
+| Método | Path | Descripción | Auth |
+|--------|------|-------------|------|
+| GET | `/actuator/health` | Health check (incluye disco + R2DBC) | No |
+| GET | `/actuator/health/liveness` | Probe de Liveness (K8s) | No |
+| GET | `/actuator/health/readiness` | Probe de Readiness (K8s) | No |
+| GET | `/actuator/prometheus` | Métricas Prometheus | Sí |
+| GET | `/actuator/info` | Info de la aplicación | Sí |
+| GET | `/actuator/metrics` | Métricas de la aplicación | Sí |
+
+> El límite de subida (500 MB) se aplica vía `MultipartWebFluxConfig`, que lee `app.storage.max-file-size` y configura el `MultipartHttpMessageReader` de WebFlux. En stack reactivo, `spring.servlet.multipart.*` **no se aplica** y debe ignorarse.
+
+## Modelo de Datos
+
+```sql
+roles              (id, name, storage_limit_bytes)
+users              (id, username, email, password_hash, role_id, created_at, updated_at)
+artists            (id, name, image_path, user_id, created_at, updated_at)
+albums             (id, title, release_date, cover_path, user_id, created_at, updated_at)
+tracks             (id, title, album, duration, file_path, file_size, cover_path, user_id, release_date, created_at, updated_at)
+album_tracks       (id, album_id, track_id, position, created_at)
+track_artists      (id, track_id, artist_id, position, created_at)
+album_artists      (id, album_id, artist_id, position, created_at)
+
+```
+
+**Roles por defecto:**
+- `ADMIN` (id=1): Almacenamiento ilimitado (verifica espacio en disco)
+- `STANDARD` (id=2): 512 MB de límite
+
+## Autenticación
+
+- **JWT HS256** con expiración de 24 horas
+- Token enviado via header `Authorization: Bearer <token>`
+- Para endpoints de streaming (`/stream`): también acepta `?token=` como query param (para players HTML)
+- **Passwords**: Hasheados con BCrypt
+- **Aislamiento**: Todas las queries filtran por `user_id`
+
+**Roles:**
+
+| Rol | Almacenamiento | Descripción |
+|-----|----------------|-------------|
+| ADMIN | Sin límite (verifica disco) | Administrador del sistema |
+| STANDARD | 512 MB | Usuario estándar |
+
+## Streaming de Audio
 
 `GET /api/tracks/{id}/stream` soporta **HTTP Range Requests** (206 Partial Content):
 
 - Sin header `Range`: archivo completo
 - Con `Range: bytes=0-1023`: primeros 1024 bytes
-- Usa `RandomAccessFile` + `Flux.generate` para lectura por chunks (64KB)
+- Usa `RandomAccessFile` + `Flux.generate` para lectura por chunks (64KB random, 256KB secuencial)
 - `subscribeOn(Schedulers.boundedElastic())` para no bloquear el event loop de Netty
+- `ZeroCopyHttpOutputMessage` cuando está disponible (zero-copy transfer)
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
@@ -156,11 +363,109 @@ curl -H "Authorization: Bearer <token>" \
 
 Cobertura de imágenes vía **Caffeine** con TTL de 1 hora:
 
-- `AudioService`: caché de bytes de cover de tracks
-- `AlbumService`: caché de bytes de cover de álbumes
-- `ArtistService`: caché de bytes de imagen de artista
+| Cache | Entradas | Descripción |
+|-------|----------|-------------|
+| `artistImageCache` | 300 | Imágenes de artistas |
+| `trackCoverCache` | 500 | Portadas de tracks |
+| `albumCoverCache` | 200 | Portadas de álbumes |
+| `artistTrackCoverCache` | 300 | Portadas de tracks por artista |
+| `fileMetadataCache` | 2000 | MIME types y tamaños de archivos |
 
-## Ejemplos de uso
+## Configuración
+
+### Variables de Entorno
+
+| Variable | Default (dev) | Descripción |
+|----------|---------------|-------------|
+| `DB_HOST` | localhost | Host PostgreSQL |
+| `DB_PORT` | 5432 | Puerto PostgreSQL |
+| `DB_NAME` | musicdb | Nombre de base de datos |
+| `DB_USER` | postgres | Usuario PostgreSQL |
+| `DB_PASSWORD` | postgres | Contraseña PostgreSQL |
+| `JWT_SECRET` | *default dev* | Secreto para firmar JWT (mín 32 chars) |
+| `JWT_EXPIRATION` | 86400000 | Expiración del token en ms |
+| `STORAGE_PATH` | dev: `C:/temp/music-storage`, prod: `/var/music/audio` | Ruta de almacenamiento de archivos |
+| `CORS_ORIGINS` | http://localhost:5173,http://localhost:3000,http://localhost:8081 | Orígenes CORS permitidos |
+| `SPRING_PROFILES_ACTIVE` | dev | Perfil activo |
+
+### Perfiles
+
+| Perfil | Descripción |
+|--------|-------------|
+| **dev** | PostgreSQL local, log DEBUG, storage en `C:/temp/music-storage`, secretos hardcodeados |
+| **prod** | Variables de entorno requeridas, log INFO, validación de secretos JWT, rotación de logs (50MB, 30 días, 1GB cap), timeouts Netty (10s connect, 60s idle), storage en `/var/music/audio` |
+
+### Configuración de puertos
+
+| Puerto | Servicio |
+|--------|----------|
+| 8080 | Aplicación principal (API + endpoints públicos) |
+| 8081 | Actuator (health, metrics, prometheus) — interno, **no expuesto al host** por `docker-compose.yml` base |
+
+> En `docker-compose.yml` base, el puerto 8081 queda dentro de la red Docker (accesible solo desde otros contenedores). Si necesitás exponerlo al host (por ejemplo, para Prometheus local), agregá el mapping `8081:8081` en `docker-compose.override.yml`.
+
+> El esquema de la base de datos (`src/main/resources/schema.sql`) se inicializa montando el archivo en `/docker-entrypoint-initdb.d/` del contenedor de PostgreSQL, no por Spring. Se ejecuta una sola vez, la primera vez que se crea el volumen de datos.
+
+## Docker
+
+### docker-compose.yml
+
+Los archivos docker-compose están en la raíz del proyecto (`ProyectoDAW/`):
+
+| Archivo | Propósito |
+|---------|-----------|
+| `docker-compose.yml` | Base: definición de servicios (postgres, backend, frontend) |
+| `docker-compose.override.yml` | Dev: se carga automático con `docker compose up` |
+| `docker-compose.prod.yml` | Prod: se usa con `-f docker-compose.yml -f docker-compose.prod.yml` |
+| `docker-compose.local.yml` | Local: solo PostgreSQL, sin apps dockerizadas |
+
+**docker-compose.yml (base):**
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-musicdb}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./back_proyecto/src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
+  backend:
+    build: ./back_proyecto
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./front_proyecto
+      args:
+        VITE_API_URL: /api
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+```
+
+### Construir y ejecutar
+
+Desde la raíz del proyecto (`ProyectoDAW/`):
+
+```bash
+docker compose up --build -d
+```
+
+## Ejemplos de Uso
 
 ### Registro
 
@@ -177,7 +482,7 @@ curl -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"juan","password":"secreto123"}'
 
-# → {"token":"eyJhbGciOiJIUzI1NiJ9...", "expiresIn":86400000}
+# → {"token":"eyJhbGciOiJIUzI1NiJ9...", "tokenType":"Bearer", "expiresIn":86400000, "user":{...}}
 ```
 
 ### Subir track
@@ -186,7 +491,17 @@ curl -X POST http://localhost:8080/api/auth/login \
 curl -X POST http://localhost:8080/api/tracks \
   -H "Authorization: Bearer <token>" \
   -F "title=Mi Canción" \
-  -F "file=@cancion.mp3"
+  -F "file=@cancion.mp3" \
+  -F "duration=240" \
+  -F "artistIds=[1,2]" \
+  -F "cover=@cover.jpg"
+```
+
+### Listar tracks con filtros
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/tracks?search=rock&page=0&size=10&sortBy=title&sortDirection=asc"
 ```
 
 ### Crear artista
@@ -198,53 +513,62 @@ curl -X POST http://localhost:8080/api/artists \
   -F "image=@foto.jpg"
 ```
 
-### Crear álbum y agregar track
+### Crear álbum
 
 ```bash
-# Crear álbum
 curl -X POST http://localhost:8080/api/albums \
   -H "Authorization: Bearer <token>" \
   -F "title=Mi Álbum" \
-  -F "artistIds=1" \
-  -F "cover=@cover.jpg"
+  -F "artistIds=[1]" \
+  -F "cover=@cover.jpg" \
+  -F "releaseDate=2026-01-15"
+```
 
-# Agregar track al álbum
+### Agregar track a álbum
+
+```bash
 curl -X POST http://localhost:8080/api/albums/1/tracks \
   -H "Authorization: Bearer <token>" \
   -F "title=Tema 1" \
-  -F "artistIds=1" \
-  -F "file=@tema1.mp3"
+  -F "file=@tema1.mp3" \
+  -F "duration=180" \
+  -F "artistIds=[1]" \
+  -F "position=1"
 ```
 
-## Configuración
+### Reordenar tracks de un álbum
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `DB_HOST` | localhost | Host PostgreSQL |
-| `DB_PORT` | 5432 | Puerto PostgreSQL |
-| `DB_NAME` | musicdb | Nombre de base de datos |
-| `DB_USER` | postgres | Usuario PostgreSQL |
-| `DB_PASSWORD` | postgres | Contraseña PostgreSQL |
-| `JWT_SECRET` | *default dev* | Secreto para firmar JWT (min 32 chars) |
-| `JWT_EXPIRATION` | 86400000 | Expiración del token en ms |
-| `STORAGE_PATH` | /data/audio | Ruta de almacenamiento de archivos |
-| `CORS_ORIGINS` | http://localhost:5173 | Orígenes CORS permitidos |
-| `SPRING_PROFILES_ACTIVE` | dev | Perfil activo |
+```bash
+curl -X PUT http://localhost:8080/api/albums/1/tracks/reorder \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '[3, 1, 2]'
+```
 
-Perfiles:
-- **dev**: PostgreSQL local, log DEBUG, storage en `C:/temp/music-storage`
-- **prod**: Espera variables de entorno, log INFO, validación de secretos
+### Descargar álbum como ZIP
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8080/api/albums/1/download \
+  -o album.zip
+```
+
+### Verificar uso de almacenamiento
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  http://localhost:8080/api/auth/storage
+
+# → {"usedBytes":1048576,"limitBytes":536870912,"availableBytes":535822336,"roleName":"STANDARD"}
+```
 
 ## Desarrollo
 
 ```bash
-# Tests
-mvn test
-
 # Compilar
 mvn clean compile
 
-# Empaquetar
+# Empaquetar (sin tests)
 mvn clean package -DskipTests
 
 # Ejecutar JAR

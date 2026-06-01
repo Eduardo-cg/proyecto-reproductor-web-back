@@ -3,51 +3,49 @@ package com.musicstreaming.common.cache;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.musicstreaming.track.service.TrackService;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.util.concurrent.TimeUnit;
-
 @Configuration
+@EnableConfigurationProperties(CacheProperties.class)
 public class CacheConfig {
+
+    private final CacheProperties properties;
+
+    public CacheConfig(CacheProperties properties) {
+        this.properties = properties;
+    }
 
     @Bean
     public Cache<Long, byte[]> artistImageCache() {
-        return Caffeine.newBuilder()
-                .maximumSize(300)
-                .expireAfterWrite(1, TimeUnit.HOURS)
-                .build();
+        return build(properties.getArtistImage());
     }
 
     @Bean
     public Cache<Long, byte[]> trackCoverCache() {
-        return Caffeine.newBuilder()
-                .maximumSize(500)
-                .expireAfterWrite(1, TimeUnit.HOURS)
-                .build();
+        return build(properties.getTrackCover());
     }
 
     @Bean
     public Cache<Long, byte[]> albumCoverCache() {
-        return Caffeine.newBuilder()
-                .maximumSize(200)
-                .expireAfterWrite(1, TimeUnit.HOURS)
-                .build();
+        return build(properties.getAlbumCover());
     }
 
     @Bean
     public Cache<Long, byte[]> artistTrackCoverCache() {
-        return Caffeine.newBuilder()
-                .maximumSize(300)
-                .expireAfterWrite(1, TimeUnit.HOURS)
-                .build();
+        return build(properties.getArtistTrackCover());
     }
 
     @Bean
     public Cache<Long, TrackService.FileMetadata> fileMetadataCache() {
+        return build(properties.getFileMetadata());
+    }
+
+    private <K, V> Cache<K, V> build(CacheProperties.Entry entry) {
         return Caffeine.newBuilder()
-                .maximumSize(2000)
-                .expireAfterWrite(1, TimeUnit.HOURS)
+                .maximumSize(entry.getMaxSize())
+                .expireAfterWrite(entry.getTtl())
                 .build();
     }
 }

@@ -11,16 +11,21 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.musicstreaming</groupId>
-    <artifactId>music-streaming-backend</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-    <name>Music Streaming Backend</name>
-    <description>Reactive Music Streaming Platform</description>
+    <groupId>${app.group-id}</groupId>
+    <artifactId>${app.artifact-id}</artifactId>
+    <version>${app.version}</version>
+    <name>${app.name}</name>
+    <description>${app.description}</description>
 
     <properties>
+        <app.name>FonoPort</app.name>
+        <app.description>Reactive Music Streaming Platform</app.description>
+        <app.group-id>com.musicstreaming</app.group-id>
+        <app.artifact-id>music-streaming-backend</app.artifact-id>
+        <app.version>1.0.0-SNAPSHOT</app.version>
         <java.version>21</java.version>
         <jjwt.version>0.12.5</jjwt.version>
-        <resilience4j.version>2.2.0</resilience4j.version>
+
     </properties>
 
     <dependencies>
@@ -93,13 +98,6 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-
-        <!-- Resilience4j -->
-        <dependency>
-            <groupId>io.github.resilience4j</groupId>
-            <artifactId>resilience4j-spring-boot3</artifactId>
-            <version>${resilience4j.version}</version>
         </dependency>
 
         <!-- Apache Commons IO -->

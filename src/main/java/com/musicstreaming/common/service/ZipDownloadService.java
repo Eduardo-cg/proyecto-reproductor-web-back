@@ -85,7 +85,8 @@ public class ZipDownloadService {
                                 channel -> {
                                     try {
                                         channel.close();
-                                    } catch (IOException ignored) {
+                                    } catch (IOException e) {
+                                        log.warn("Failed to close channel for temp zip {}: {}", tempZip, e.getMessage());
                                     }
                                     deleteTempFile(tempZip);
                                 }
@@ -100,7 +101,8 @@ public class ZipDownloadService {
     private void deleteTempFile(Path path) {
         try {
             Files.deleteIfExists(path);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to delete temp file {}: {}", path, e.getMessage());
         }
     }
 }

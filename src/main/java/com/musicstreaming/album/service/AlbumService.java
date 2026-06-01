@@ -135,7 +135,7 @@ public class AlbumService {
                     });
                 })
                 .flatMap(this::albumToDto)
-                .doOnSuccess(a -> log.info("Album updated: {} (id={})", a.getTitle(), a.getId()));
+                .doOnSuccess(a -> log.info("Album updated userId={} title={} id={}", userId, a.getTitle(), a.getId()));
     }
 
     public Mono<PageResponse<AlbumDTO>> getUserAlbums(Long userId, int page, int size, String search, List<Long> artistIds, String sortBy, String sortDirection) {
@@ -231,7 +231,7 @@ public class AlbumService {
                                         .flatMap(track -> artistLinkService.saveTrackArtists(track.getId(), artistIds).thenReturn(track))
                                         .flatMap(track -> linkTrackToAlbum(albumId, track.getId(), position).thenReturn(track))
                                         .flatMap(this::trackToDtoWithCover)
-                                        .doOnSuccess(t -> log.info("Track added to album {}: {}", albumId, t.getTitle()));
+                                        .doOnSuccess(t -> log.info("Track added to album userId={} albumId={} title={}", userId, albumId, t.getTitle()));
                             });
                 });
     }
@@ -325,7 +325,7 @@ public class AlbumService {
                         }))
                 .then(albumTrackRepository.deleteByAlbumId(album.getId()))
                 .then(albumRepository.deleteById(album.getId()))
-                .doOnSuccess(v -> log.info("Album deleted: {}", album.getId()));
+                .doOnSuccess(v -> log.info("Album deleted userId={} albumId={}", album.getUserId(), album.getId()));
     }
 
     private Mono<AlbumStats> fetchAlbumStats(Long albumId) {

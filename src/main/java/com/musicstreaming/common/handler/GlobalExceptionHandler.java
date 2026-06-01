@@ -1,9 +1,11 @@
 package com.musicstreaming.common.handler;
 
+import com.musicstreaming.common.exception.BadRequestException;
 import com.musicstreaming.common.exception.ResourceAlreadyExistsException;
 import com.musicstreaming.common.exception.ResourceNotFoundException;
 import com.musicstreaming.common.exception.StorageLimitExceededException;
 import com.musicstreaming.common.exception.UnauthorizedException;
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import reactor.core.publisher.Mono;
 
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -37,23 +40,32 @@ public class GlobalExceptionHandler {
                 .body(Map.of("error", ex.getMessage())));
     }
 
+    @ExceptionHandler(BadRequestException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleBadRequest(BadRequestException ex) {
+        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", ex.getMessage())));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public Mono<ResponseEntity<Map<String, String>>> handleConstraintViolation(ConstraintViolationException ex) {
+        String message = ex.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + " " + v.getMessage())
+                .collect(Collectors.joining("; "));
+        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", message.isEmpty() ? "Invalid request parameters" : message)));
+    }
+
     @ExceptionHandler(StorageLimitExceededException.class)
     public Mono<ResponseEntity<Map<String, String>>> handleStorageLimit(StorageLimitExceededException ex) {
         return Mono.just(ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
                 .body(Map.of("error", ex.getMessage())));
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public Mono<ResponseEntity<Map<String, String>>> handleBadRequest(IllegalArgumentException ex) {
-        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("error", ex.getMessage())));
-    }
-
     @ExceptionHandler(RuntimeException.class)
     public Mono<ResponseEntity<Map<String, String>>> handleRuntimeException(RuntimeException ex) {
-        log.error("Runtime exception: {}", ex.getMessage());
+        log.error("Runtime exception: {}", ex.getMessage(), ex);
         return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Internal server error")));
+                .body(Map.of("error", "Internal server error")));
     }
 
     @ExceptionHandler(Exception.class)

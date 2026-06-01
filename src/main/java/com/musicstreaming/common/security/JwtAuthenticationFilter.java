@@ -44,7 +44,7 @@ public class JwtAuthenticationFilter implements WebFilter {
                                 .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication));
                     })
                     .onErrorResume(e -> {
-                        log.error("Error authenticating user: {}", e.getMessage());
+                        log.error("Error authenticating user {}: {}", username, e.getMessage());
                         return chain.filter(exchange);
                     });
         }
@@ -61,9 +61,12 @@ public class JwtAuthenticationFilter implements WebFilter {
             return bearerToken.substring(BEARER_PREFIX.length());
         }
 
-        String queryToken = exchange.getRequest().getQueryParams().getFirst("token");
-        if (queryToken != null && !queryToken.isEmpty()) {
-            return queryToken;
+        String path = exchange.getRequest().getPath().value();
+        if (path.matches(".+/stream$")) {
+            String queryToken = exchange.getRequest().getQueryParams().getFirst("token");
+            if (queryToken != null && !queryToken.isEmpty()) {
+                return queryToken;
+            }
         }
 
         return null;

@@ -27,14 +27,14 @@ public class AuthController {
     public Mono<ResponseEntity<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
         return authService.register(request)
                 .map(user -> ResponseEntity.status(HttpStatus.CREATED).body(user))
-                .doOnSuccess(r -> log.info("Register successful for: {}", request.getUsername()));
+                .doOnSuccess(r -> log.info("Register successful userId={} username={}", r.getBody().getId(), request.getUsername()));
     }
 
     @PostMapping("/login")
     public Mono<ResponseEntity<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request.getUsername(), request.getPassword())
                 .map(ResponseEntity::ok)
-                .doOnSuccess(r -> log.info("Login successful for: {}", request.getUsername()));
+                .doOnSuccess(r -> log.info("Login successful userId={} username={}", r.getBody().getUser().getId(), request.getUsername()));
     }
 
     @GetMapping("/me")

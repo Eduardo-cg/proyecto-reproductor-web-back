@@ -8,6 +8,9 @@ import com.musicstreaming.common.dto.PageResponse;
 import com.musicstreaming.common.util.ParserUtils;
 import com.musicstreaming.common.util.JsonParamParser;
 import com.musicstreaming.track.dto.TrackDTO;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -15,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
@@ -23,6 +27,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/albums")
 @RequiredArgsConstructor
+@Validated
 public class AlbumController {
 
     private final AlbumService albumService;
@@ -45,8 +50,8 @@ public class AlbumController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(value = "search", required = false) String search,
             @RequestParam(value = "artistIds", required = false) List<Long> artistIds,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(value = "sortBy", defaultValue = "title") String sortBy,
             @RequestParam(value = "sortDirection", defaultValue = "asc") String sortDirection) {
 
@@ -59,8 +64,8 @@ public class AlbumController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(value = "search", required = false) String search,
             @RequestParam(value = "artistIds", required = false) List<Long> artistIds,
-            @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "10") int size) {
+            @RequestParam(value = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(value = "size", defaultValue = "10") @Min(1) @Max(100) int size) {
         return albumService.getUserAlbumsList(principal.getId(), search, artistIds, page, size)
                 .map(ResponseEntity::ok);
     }
@@ -68,7 +73,7 @@ public class AlbumController {
     @GetMapping("/{id}")
     public Mono<ResponseEntity<AlbumWithTracksDTO>> getAlbumWithTracks(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id) {
+            @PathVariable @Positive Long id) {
         return albumService.getAlbumWithTracks(id, principal.getId())
                 .map(ResponseEntity::ok);
     }
@@ -76,7 +81,7 @@ public class AlbumController {
     @PutMapping(value = "/{id}", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
     public Mono<ResponseEntity<AlbumDTO>> updateAlbum(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             @RequestPart(value = "title", required = false) String title,
             @RequestPart(value = "artistIds", required = false) String artistIdsJson,
             @RequestPart(value = "releaseDate", required = false) String releaseDateStr,
@@ -90,7 +95,7 @@ public class AlbumController {
     @DeleteMapping("/{id}")
     public Mono<ResponseEntity<Void>> deleteAlbum(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id) {
+            @PathVariable @Positive Long id) {
         return albumService.deleteAlbum(id, principal.getId())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
@@ -98,7 +103,7 @@ public class AlbumController {
     @GetMapping("/{id}/download")
     public Mono<Void> downloadAlbum(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             ServerHttpResponse response) {
         return albumService.downloadAlbum(id, principal.getId(), response);
     }
@@ -106,7 +111,7 @@ public class AlbumController {
     @PostMapping(value = "/{id}/tracks", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
     public Mono<ResponseEntity<TrackDTO>> addTrackToAlbum(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             @RequestPart("title") String title,
             @RequestPart(value = "artistIds", required = false) String artistIdsJson,
             @RequestPart("duration") String duration,
@@ -123,8 +128,8 @@ public class AlbumController {
     @DeleteMapping("/{id}/tracks/{trackId}")
     public Mono<ResponseEntity<Void>> removeTrackFromAlbum(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
-            @PathVariable Long trackId) {
+            @PathVariable @Positive Long id,
+            @PathVariable @Positive Long trackId) {
         return albumService.removeTrackFromAlbum(id, trackId, principal.getId())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
@@ -132,7 +137,7 @@ public class AlbumController {
     @PutMapping("/{id}/tracks/reorder")
     public Mono<ResponseEntity<Void>> reorderAlbumTracks(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             @RequestBody List<Long> trackIds) {
         return albumService.reorderAlbumTracks(id, trackIds, principal.getId())
                 .then(Mono.just(ResponseEntity.ok().build()));

@@ -70,14 +70,15 @@ public class ReactiveFileService {
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(path -> file.transferTo(path).thenReturn(path))
-                .flatMap(path -> {
-                    try {
-                        outSize.set(Files.size(path));
-                    } catch (Exception e) {
-                        outSize.set(file.headers().getContentLength());
-                    }
-                    return Mono.just(relativePath);
-                });
+                .flatMap(path -> Mono.fromCallable(() -> {
+                            try {
+                                outSize.set(Files.size(path));
+                            } catch (Exception e) {
+                                outSize.set(file.headers().getContentLength());
+                            }
+                            return relativePath;
+                        })
+                        .subscribeOn(Schedulers.boundedElastic()));
     }
 
     public Mono<String> uploadCover(FilePart cover, Long userId, String category) {
@@ -94,19 +95,21 @@ public class ReactiveFileService {
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(tp -> cover.transferTo(tp).thenReturn(tp))
-                .map(tp -> {
-                    ImageUtils.resizeIfNeeded(tp, finalFullPath);
-                    if (!tp.equals(finalFullPath)) {
-                        try {
-                            Files.deleteIfExists(tp);
-                        } catch (Exception ignored) {
-                        }
-                    }
-                    return relativePath;
-                })
+                .flatMap(tp -> Mono.fromCallable(() -> {
+                            ImageUtils.resizeIfNeeded(tp, finalFullPath);
+                            if (!tp.equals(finalFullPath)) {
+                                try {
+                                    Files.deleteIfExists(tp);
+                                } catch (Exception e) {
+                                    log.warn("Failed to delete temp cover file {}: {}", tp, e.getMessage());
+                                }
+                            }
+                            return relativePath;
+                        })
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .doOnError(e -> {
-                    try { Files.deleteIfExists(tempFullPath); } catch (Exception ignored) {}
-                    try { Files.deleteIfExists(finalFullPath); } catch (Exception ignored) {}
+                    try { Files.deleteIfExists(tempFullPath); } catch (Exception ex) { log.warn("Failed to delete temp file {}: {}", tempFullPath, ex.getMessage()); }
+                    try { Files.deleteIfExists(finalFullPath); } catch (Exception ex) { log.warn("Failed to delete final file {}: {}", finalFullPath, ex.getMessage()); }
                 });
     }
 

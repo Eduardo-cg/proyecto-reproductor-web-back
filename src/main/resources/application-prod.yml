@@ -1,17 +1,47 @@
 spring:
   r2dbc:
     pool:
+      initial-size: 10
       max-size: 50
       max-idle-time: 60s
+      max-life-time: 1800s
+      acquisition-timeout: 5s
+      validation-query: SELECT 1
+  data:
+    r2dbc:
+      repositories:
+        bootstrap-mode: deferred
+  # NOTE: schema.sql is mounted into PostgreSQL via docker-compose (see ../docker-compose.yml),
+  # so it is NOT initialized by Spring's spring.sql.init on app startup.
+
+server:
+  netty:
+    connection-timeout: 10s
+    idle-timeout: 60s
 
 app:
   storage:
-    base-path: /var/music/audio
-
+    base-path: ${STORAGE_PATH:/var/music/audio}
   cors:
     allowed-origins: ${CORS_ORIGINS}
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    java:
+      enabled: true
 
 logging:
   level:
     com.musicstreaming: INFO
     org.springframework.security: WARN
+    reactor.netty: WARN
+  file:
+    name: /var/log/musicapp/application.log
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 30
+      total-size-cap: 1GB

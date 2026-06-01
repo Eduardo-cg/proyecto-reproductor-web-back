@@ -1,5 +1,8 @@
 package com.musicstreaming.common.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
 import java.awt.Image;
@@ -9,6 +12,7 @@ import java.nio.file.Path;
 
 public final class ImageUtils {
 
+    private static final Logger log = LoggerFactory.getLogger(ImageUtils.class);
     private static final int MAX_DIMENSION = 800;
     private static final long MAX_SIZE_BYTES = 1_000_000;
 
@@ -60,10 +64,12 @@ public final class ImageUtils {
             FileUtils.createDirectories(target.getParent());
             ImageIO.write(resized, formatName, target.toFile());
         } catch (Exception e) {
+            log.warn("Failed to resize image {}, falling back to copy: {}", source, e.getMessage());
             try {
                 FileUtils.createDirectories(target.getParent());
                 Files.copy(source, target);
-            } catch (Exception ignored) {
+            } catch (Exception ex) {
+                log.warn("Failed to copy image {} to {}: {}", source, target, ex.getMessage());
             }
         }
     }

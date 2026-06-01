@@ -6,6 +6,9 @@ import com.musicstreaming.common.util.JsonParamParser;
 import com.musicstreaming.common.util.ParserUtils;
 import com.musicstreaming.track.dto.TrackDTO;
 import com.musicstreaming.track.service.TrackService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -13,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
@@ -21,6 +25,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/tracks")
 @RequiredArgsConstructor
+@Validated
 public class TrackController {
 
     private final TrackService trackService;
@@ -52,7 +57,7 @@ public class TrackController {
     @GetMapping("/{id}")
     public Mono<ResponseEntity<TrackDTO>> getTrackMetadata(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id) {
+            @PathVariable @Positive Long id) {
         return trackService.getTrackMetadata(id, principal.getId())
                 .map(ResponseEntity::ok);
     }
@@ -63,8 +68,8 @@ public class TrackController {
             @RequestParam(value = "search", required = false) String search,
             @RequestParam(value = "artistIds", required = false) List<Long> artistIds,
             @RequestParam(value = "albumIds", required = false) List<Long> albumIds,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(value = "sortBy", defaultValue = "title") String sortBy,
             @RequestParam(value = "sortDirection", defaultValue = "asc") String sortDirection) {
 
@@ -82,7 +87,7 @@ public class TrackController {
     @PutMapping(value = "/{id}", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
     public Mono<ResponseEntity<TrackDTO>> updateTrack(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             @RequestPart(value = "title", required = false) String title,
             @RequestPart(value = "artistIds", required = false) String artistIdsJson,
             @RequestPart(value = "album", required = false) String album,
@@ -97,7 +102,7 @@ public class TrackController {
     @DeleteMapping("/{id}")
     public Mono<ResponseEntity<Void>> deleteTrack(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id) {
+            @PathVariable @Positive Long id) {
         return trackService.deleteTrack(id, principal.getId())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
@@ -105,7 +110,7 @@ public class TrackController {
     @GetMapping("/{id}/download")
     public Mono<Void> downloadTrack(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             ServerHttpResponse response) {
         return trackService.downloadTrack(id, principal.getId(), response);
     }
@@ -113,7 +118,7 @@ public class TrackController {
     @GetMapping("/{id}/stream")
     public Mono<Void> streamTrack(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
+            @PathVariable @Positive Long id,
             @RequestHeader(value = "Range", required = false) String rangeHeader,
             ServerHttpResponse response) {
         return trackService.streamTrack(id, principal.getId(), rangeHeader, response);
