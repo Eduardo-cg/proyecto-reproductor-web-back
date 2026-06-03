@@ -11,7 +11,7 @@ import org.springframework.web.reactive.config.WebFluxConfigurer;
 @Configuration
 public class MultipartWebFluxConfig {
 
-    private static final int DEFAULT_IN_MEMORY_SIZE_BYTES = 256 * 1024;
+    private static final int DEFAULT_IN_MEMORY_SIZE_BYTES = 32 * 1024 * 1024; // 32 MB
     private static final int DEFAULT_MAX_PARTS = -1;
 
     @Value("${app.storage.max-file-size}")

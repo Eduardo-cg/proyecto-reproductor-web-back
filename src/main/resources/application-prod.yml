@@ -20,15 +20,14 @@ server:
     idle-timeout: 60s
 
 app:
+  jwt:
+    secret: ${JWT_SECRET:?JWT_SECRET es obligatorio en produccion}
   storage:
     base-path: ${STORAGE_PATH:/var/music/audio}
   cors:
-    allowed-origins: ${CORS_ORIGINS}
+    allowed-origins: ${CORS_ORIGINS:?CORS_ORIGINS es obligatorio en produccion}
 
 management:
-  endpoint:
-    health:
-      show-details: when-authorized
   info:
     java:
       enabled: true

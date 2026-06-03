@@ -97,7 +97,7 @@ docker compose -f docker-compose.local.yml up -d
 
 ### 2. Configurar almacenamiento
 
-En perfil `dev`, por defecto los audios se guardan en `C:/temp/music-storage`. En `prod` la ruta es `/var/music/audio`. Creá la carpeta según tu perfil:
+En perfil `dev` corriendo el backend directo en Windows (sin Docker), los audios se guardan por defecto en `C:/temp/music-storage`. En `dev` y `prod` corriendo dentro de Docker, la ruta unificada es `/var/music/audio` (montada como volumen named `music_storage` y configurada vía `STORAGE_PATH` en `docker-compose.override.yml` / `docker-compose.prod.yml`). Creá la carpeta según cómo vayas a ejecutar:
 
 ```bash
 mkdir C:/temp/music-storage
@@ -375,25 +375,37 @@ Cobertura de imágenes vía **Caffeine** con TTL de 1 hora:
 
 ### Variables de Entorno
 
-| Variable | Default (dev) | Descripción |
-|----------|---------------|-------------|
-| `DB_HOST` | localhost | Host PostgreSQL |
-| `DB_PORT` | 5432 | Puerto PostgreSQL |
-| `DB_NAME` | musicdb | Nombre de base de datos |
-| `DB_USER` | postgres | Usuario PostgreSQL |
-| `DB_PASSWORD` | postgres | Contraseña PostgreSQL |
-| `JWT_SECRET` | *default dev* | Secreto para firmar JWT (mín 32 chars) |
-| `JWT_EXPIRATION` | 86400000 | Expiración del token en ms |
-| `STORAGE_PATH` | dev: `C:/temp/music-storage`, prod: `/var/music/audio` | Ruta de almacenamiento de archivos |
-| `CORS_ORIGINS` | http://localhost:5173,http://localhost:3000,http://localhost:8081 | Orígenes CORS permitidos |
-| `SPRING_PROFILES_ACTIVE` | dev | Perfil activo |
+| Variable | Default (dev) | Default (prod) | Descripción |
+|----------|---------------|----------------|-------------|
+| `DB_HOST` | localhost | (sin default) | Host PostgreSQL |
+| `DB_PORT` | 5432 | (sin default) | Puerto PostgreSQL |
+| `DB_NAME` | musicdb | (sin default) | Nombre de base de datos |
+| `DB_USER` | postgres | (sin default) | Usuario PostgreSQL |
+| `DB_PASSWORD` | postgres | (sin default) | Contraseña PostgreSQL |
+| `JWT_SECRET` | placeholder genérico (mín 32 chars) | **requerido** (falla sin env) | Secreto para firmar JWT HS256 |
+| `STORAGE_PATH` | `C:/temp/music-storage` (sin Docker) / `/var/music/audio` (con Docker) | `/var/music/audio` | Ruta de almacenamiento de archivos |
+| `CORS_ORIGINS` | `http://localhost:5173` | **requerido** (falla sin env) | Orígenes CORS permitidos (separados por coma) |
+| `SPRING_PROFILES_ACTIVE` | `dev` | `prod` | Perfil Spring activo |
+
+> El archivo `back_proyecto/.env.example` contiene el mismo set de variables con valores de muestra para dev local sin Docker.
+
+### Mapa: dónde se setea cada variable → dónde se lee
+
+| Variable | Fuentes posibles (en orden de prioridad) | Lectura |
+|----------|------------------------------------------|---------|
+| `SPRING_PROFILES_ACTIVE` | `docker-compose.override.yml`, `docker-compose.prod.yml`, env shell, raíz `.env` | `application.yml` → `spring.profiles.active` |
+| `JWT_SECRET` | `docker-compose.override.yml` (dev), `docker-compose.prod.yml` (prod, requerido), env shell | `application-dev.yml` / `application-prod.yml` → `app.jwt.secret` → `JwtTokenProvider`, `JwtSecretValidator` |
+| `STORAGE_PATH` | `docker-compose.override.yml` (`/var/music/audio`), `docker-compose.prod.yml` (`/var/music/audio`), env shell | `application-dev.yml` / `application-prod.yml` → `app.storage.base-path` → `ReactiveFileService`, `StorageService`, `CoverService`, `StorageHealthIndicator` |
+| `CORS_ORIGINS` | `docker-compose.override.yml`, `docker-compose.prod.yml` (requerido), env shell | `application-dev.yml` / `application-prod.yml` → `app.cors.allowed-origins` → `SecurityConfig` |
+| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | raíz `.env` (default `musicdb` / `postgres` / `postgres`), `docker-compose.yml`, env shell | `application.yml` → `spring.r2dbc.{name,username,password}` |
+| `DB_HOST` / `DB_PORT` | `docker-compose.yml` (prod → `postgres:5432`), env shell | `application.yml` → `spring.r2dbc.url` |
 
 ### Perfiles
 
 | Perfil | Descripción |
 |--------|-------------|
-| **dev** | PostgreSQL local, log DEBUG, storage en `C:/temp/music-storage`, secretos hardcodeados |
-| **prod** | Variables de entorno requeridas, log INFO, validación de secretos JWT, rotación de logs (50MB, 30 días, 1GB cap), timeouts Netty (10s connect, 60s idle), storage en `/var/music/audio` |
+| **dev** | Pool R2DBC chico (2-5 conexiones), log DEBUG, `app.jwt.secret` con default, `app.storage.base-path` en `C:/temp/music-storage`, `app.cors.allowed-origins` con default `http://localhost:5173` |
+| **prod** | Pool R2DBC grande (10-50 conexiones, acquisition-timeout 5s), log INFO con rotación (50MB × 30, cap 1GB), timeouts Netty (10s connect, 60s idle), `bootstrap-mode: deferred`, `app.jwt.secret` y `app.cors.allowed-origins` **requeridos** sin default, `app.storage.base-path` con default `/var/music/audio` |
 
 ### Configuración de puertos
 

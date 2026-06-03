@@ -1,11 +1,19 @@
+spring:
+  r2dbc:
+    pool:
+      initial-size: 2
+      max-size: 5
+      max-idle-time: 30s
+      max-life-time: 1800s
+      validation-query: SELECT 1
+
 app:
   jwt:
-    secret: ${JWT_SECRET:-dev-secret-key-must-be-at-least-32-characters-long-for-hs256}
-    expiration: 86400000
+    secret: ${JWT_SECRET:your-256-bit-secret-key-here-must-be-at-least-32-characters-long}
   storage:
     base-path: ${STORAGE_PATH:C:/temp/music-storage}
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
 
 logging:
   level:
