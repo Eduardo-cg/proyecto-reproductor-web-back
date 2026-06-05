@@ -7,20 +7,17 @@ import com.musicstreaming.artist.service.ArtistLinkService;
 import com.musicstreaming.auth.service.StorageService;
 import com.musicstreaming.common.cache.CoverService;
 import com.musicstreaming.common.dto.PageResponse;
+import com.musicstreaming.common.exception.BadRequestException;
 import com.musicstreaming.common.exception.StorageLimitExceededException;
 import com.musicstreaming.common.service.ReactiveFileService;
-import com.musicstreaming.common.util.FileUtils;
-import com.musicstreaming.common.util.OwnershipValidator;
-import com.musicstreaming.common.util.RangeHeaderParser;
-import com.musicstreaming.common.util.ResponseHeaderHelper;
-import com.musicstreaming.common.util.SortHelper;
+import com.musicstreaming.common.util.*;
 import com.musicstreaming.track.dto.TrackDTO;
+import com.musicstreaming.track.dto.TrackMetadata;
 import com.musicstreaming.track.entity.Track;
 import com.musicstreaming.track.repository.TrackArtistRepository;
 import com.musicstreaming.track.repository.TrackRepository;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -30,12 +27,12 @@ import org.springframework.http.ZeroCopyHttpOutputMessage;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.nio.file.Path;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -44,9 +41,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TrackService {
-
-    private static final Logger log = LoggerFactory.getLogger(TrackService.class);
 
     private static final Map<String, String> TRACK_SORT_MAPPING = Map.of(
             "artist", "title",
@@ -63,6 +59,7 @@ public class TrackService {
     private final StorageService storageService;
     private final ReactiveFileService reactiveFileService;
     private final CoverService coverService;
+    private final TransactionalOperator transactionalOperator;
     private final Cache<Long, byte[]> trackCoverCache;
     private final Cache<Long, FileMetadata> fileMetadataCache;
 
@@ -72,14 +69,13 @@ public class TrackService {
     private record TrackQueryResult(Flux<Track> content, Mono<Long> total) {
     }
 
-    public Mono<TrackDTO> uploadTrack(String title, List<Long> artistIds, String album,
-                                      Integer duration, FilePart file,
-                                      FilePart cover, Long userId, LocalDate releaseDate) {
+    public Mono<TrackDTO> uploadTrack(TrackMetadata meta, FilePart file,
+                                      FilePart cover, Long userId) {
         long fileSize = file.headers().getContentLength();
 
         return storageService.checkLimit(userId, fileSize)
                 .flatMap(canUpload -> {
-                    if (!canUpload) {
+                    if (Boolean.FALSE.equals(canUpload)) {
                         return Mono.error(new StorageLimitExceededException(
                                 "Storage limit exceeded. Cannot upload " + (fileSize / 1024 / 1024) + " MB."));
                     }
@@ -87,8 +83,8 @@ public class TrackService {
                     AtomicLong actualSize = new AtomicLong(fileSize);
                     return reactiveFileService.uploadFileWithSize(file, userId, "tracks", actualSize)
                             .flatMap(relativePath -> {
-                                Track track = createTrackFromUpload(title, album, duration,
-                                        relativePath, actualSize.get(), userId, releaseDate);
+                                Track track = createTrackFromUpload(meta,
+                                        relativePath, actualSize.get(), userId);
 
                                 if (cover != null) {
                                     return reactiveFileService.uploadCover(cover, userId, "covers")
@@ -99,7 +95,7 @@ public class TrackService {
                                 }
                                 return trackRepository.save(track);
                             })
-                            .flatMap(track -> artistLinkService.saveTrackArtists(track.getId(), artistIds).thenReturn(track))
+                            .flatMap(track -> artistLinkService.saveTrackArtists(track.getId(), meta.artistIds()).thenReturn(track))
                             .flatMap(this::trackToDtoWithCover)
                             .doOnSuccess(t -> log.info("Track uploaded userId={} title={} artists={}", userId, t.getTitle(), t.getArtists().size()));
                 });
@@ -133,18 +129,17 @@ public class TrackService {
         return trackRepository.countByUserId(userId);
     }
 
-    public Mono<TrackDTO> updateTrack(Long trackId, String title, List<Long> artistIds,
-                                      String album, LocalDate releaseDate,
+    public Mono<TrackDTO> updateTrack(Long trackId, TrackMetadata meta,
                                       FilePart cover, Long userId) {
         return OwnershipValidator.requireOwnership(
                         trackRepository.findById(trackId), userId, "Track", trackId, Track::getUserId)
                 .flatMap(track -> {
-                    applyTrackUpdates(track, title, album, releaseDate);
+                    applyTrackUpdates(track, meta);
 
                     Mono<Track> saveMono;
                     if (cover != null) {
                         saveMono = reactiveFileService.replaceCover(
-                                cover, userId, "covers", track.getCoverPath(), trackId, trackCoverCache)
+                                        cover, userId, "covers", track.getCoverPath(), trackId, trackCoverCache)
                                 .flatMap(newCoverPath -> {
                                     track.setCoverPath(newCoverPath);
                                     return trackRepository.save(track);
@@ -154,9 +149,9 @@ public class TrackService {
                     }
 
                     return saveMono.flatMap(savedTrack -> {
-                        if (artistIds != null && !artistIds.isEmpty()) {
+                        if (meta.artistIds() != null && !meta.artistIds().isEmpty()) {
                             return trackArtistRepository.deleteByTrackId(trackId)
-                                    .then(artistLinkService.saveTrackArtists(trackId, artistIds))
+                                    .then(artistLinkService.saveTrackArtists(trackId, meta.artistIds()))
                                     .thenReturn(savedTrack);
                         }
                         return Mono.just(savedTrack);
@@ -171,10 +166,11 @@ public class TrackService {
                         trackRepository.findById(trackId), userId, "Track", trackId, Track::getUserId)
                 .flatMap(track -> {
                     Path fullPath = reactiveFileService.resolvePath(track.getFilePath());
-                    return trackArtistRepository.deleteByTrackId(trackId)
+                    return transactionalOperator.transactional(trackArtistRepository.deleteByTrackId(trackId)
                             .then(reactiveFileService.deleteFile(fullPath))
                             .then(deleteCoverIfOrphaned(track, trackId))
-                            .then(trackRepository.deleteById(trackId));
+                            .then(trackRepository.deleteById(trackId))
+                    );
                 })
                 .doOnSuccess(v -> {
                     fileMetadataCache.invalidate(trackId);
@@ -252,39 +248,42 @@ public class TrackService {
                         reactiveFileService.readFile(path, start, end, sequential)));
     }
 
-    private Track createTrackFromUpload(String title, String album, Integer duration,
-                                         String relativePath, Long fileSize, Long userId,
-                                         LocalDate releaseDate) {
+    private Track createTrackFromUpload(TrackMetadata meta,
+                                        String relativePath, Long fileSize, Long userId) {
         Track track = new Track();
-        track.setTitle(title);
-        track.setAlbum(album);
-        track.setDuration(duration);
+        track.setTitle(meta.title());
+        track.setAlbum(meta.album());
+        track.setDuration(meta.duration());
         track.setFilePath(relativePath);
         track.setFileSize(fileSize);
         track.setUserId(userId);
-        track.setReleaseDate(releaseDate);
+        track.setReleaseDate(meta.releaseDate());
         track.setCreatedAt(LocalDateTime.now());
         track.setUpdatedAt(LocalDateTime.now());
         return track;
     }
 
-    private void applyTrackUpdates(Track track, String title, String album, LocalDate releaseDate) {
-        if (title != null && !title.trim().isEmpty()) {
-            track.setTitle(title.trim());
+    private void applyTrackUpdates(Track track, TrackMetadata meta) {
+        if (meta.title() != null) {
+            String trimmed = meta.title().trim();
+            if (trimmed.isEmpty()) {
+                throw new BadRequestException("Title cannot be blank");
+            }
+            track.setTitle(trimmed);
         }
-        if (album != null) {
-            track.setAlbum(album.trim());
+        if (meta.album() != null) {
+            track.setAlbum(meta.album().trim());
         }
-        if (releaseDate != null) {
-            track.setReleaseDate(releaseDate);
+        if (meta.releaseDate() != null) {
+            track.setReleaseDate(meta.releaseDate());
         }
         track.setUpdatedAt(LocalDateTime.now());
     }
 
     private TrackQueryResult resolveTrackQuery(Long userId, String query, List<Long> artistIds,
-                                                List<Long> albumIds, boolean hasSearch,
-                                                boolean hasArtistIds, boolean hasAlbumIds,
-                                                boolean sortByArtist, String dir, Pageable pageable) {
+                                               List<Long> albumIds, boolean hasSearch,
+                                               boolean hasArtistIds, boolean hasAlbumIds,
+                                               boolean sortByArtist, String dir, Pageable pageable) {
         if (hasSearch && hasArtistIds && hasAlbumIds) {
             return new TrackQueryResult(
                     sortByArtist
@@ -356,9 +355,9 @@ public class TrackService {
     private Mono<Path> getTrackFilePath(Long trackId, Long userId) {
         Mono<Track> trackMono = userId != null
                 ? OwnershipValidator.requireOwnership(
-                        trackRepository.findById(trackId), userId, "Track", trackId, Track::getUserId)
+                trackRepository.findById(trackId), userId, "Track", trackId, Track::getUserId)
                 : trackRepository.findById(trackId)
-                        .switchIfEmpty(Mono.error(new com.musicstreaming.common.exception.ResourceNotFoundException("Track", trackId)));
+                  .switchIfEmpty(Mono.error(new com.musicstreaming.common.exception.ResourceNotFoundException("Track", trackId)));
         return trackMono.map(track -> reactiveFileService.resolvePath(track.getFilePath()));
     }
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-STORAGE_PATH="${STORAGE_PATH:-/var/music/audio}"
+STORAGE_PATH="${STORAGE_PATH:-/var/music-storage}"
 
 mkdir -p "$STORAGE_PATH"
 chown -R appuser:appgroup "$STORAGE_PATH"

@@ -1,5 +1,8 @@
 spring:
   r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:musicdb}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
     pool:
       initial-size: 2
       max-size: 5
@@ -13,7 +16,7 @@ app:
   storage:
     base-path: ${STORAGE_PATH:/var/music-storage}
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
 
 logging:
   level:

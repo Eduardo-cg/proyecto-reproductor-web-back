@@ -2,20 +2,25 @@
 
 Backend reactivo para plataforma de streaming de música estilo Spotify. Construido con Spring WebFlux, R2DBC y PostgreSQL, siguiendo arquitectura hexagonal por bounded contexts.
 
-## Características
+## Tabla de contenidos
 
-- **Streaming de audio con Range requests** - Soporte completo para HTTP Range (206 Partial Content) con lectura por chunks (64KB random, 256KB secuencial)
-- **Carga multipart** - Subida de archivos de audio (hasta 500MB), portadas de tracks/álbumes e imágenes de artistas
-- **Procesamiento de imágenes** - Redimensionamiento automático de portadas con Caffeine cache (TTL 1h)
-- **Descarga ZIP** - Álbumes y artistas descargables como archivos ZIP con estructura de carpetas
-- **Gestión de almacenamiento** - Límites por rol con tracking de uso; ADMIN sin límite, STANDARD con 512MB
-- **Búsqueda sin acentos** - Extensión PostgreSQL `unaccent()` para buscar "cafe" y encontrar "café"
-- **Filtrado y ordenamiento avanzado** - Tracks y álbumes soportan búsqueda por texto, filtrado por artista/álbum, y sorting por título, artista, año o duración
-- **Rate limiting** - Implementación custom en endpoints de login (10/min) y registro (5/min) por IP
-- **Autenticación JWT** - Tokens HS256 con expiración de 24 horas
-- **Aislamiento de datos** - Todas las queries filtran por `user_id`; `OwnershipValidator` protege recursos
-- **Health monitoring** - `StorageHealthIndicator` verifica espacio en disco + Actuator en puerto 8081
-- **Apagado graceful** - Timeout de 30 segundos para cierre ordenado
+- [Stack Tecnológico](#stack-tecnológico)
+- [Características](#características)
+- [Estructura del Proyecto](#estructura-del-proyecto)
+- [Prerrequisitos](#prerrequisitos)
+- [Inicio Rápido](#inicio-rápido)
+- [API Endpoints (Backend)](#api-endpoints-backend)
+- [Modelo de Datos](#modelo-de-datos)
+- [Autenticación](#autenticación)
+- [Streaming de Audio](#streaming-de-audio)
+- [Caché](#caché)
+- [Configuración y Despliegue](#configuración-y-despliegue)
+- [Docker](#docker)
+- [Ejemplos de Uso](#ejemplos-de-uso)
+- [Scripts](#scripts)
+- [Documentación relacionada](#documentación-relacionada)
+
+---
 
 ## Stack Tecnológico
 
@@ -37,7 +42,45 @@ Backend reactivo para plataforma de streaming de música estilo Spotify. Constru
 | Procesamiento archivos | Apache Tika 2.9.2 + Commons IO 2.16.1 | MIME detection |
 | Containerización | Docker + Docker Compose | Multi-stage build |
 
-## Arquitectura
+---
+
+## Características
+
+### Streaming y archivos
+
+- **Streaming de audio con Range requests** - Soporte completo para HTTP Range (206 Partial Content) con lectura por chunks (64 KB random, 256 KB secuencial)
+- **Carga multipart** - Carga de archivos de audio (hasta 500 MB), portadas de tracks/álbumes e imágenes de artistas
+- **Procesamiento de imágenes** - Redimensionamiento automático de portadas con Caffeine cache (TTL 1h)
+- **Descarga ZIP** - Álbumes y artistas descargables como archivos ZIP con estructura de carpetas
+- **Protección path traversal** - `FilenameSanitizer.safeResolve()` valida que cualquier ruta resuelta quede dentro del directorio base de almacenamiento
+
+### Autenticación y autorización
+
+- **Autenticación JWT** - Tokens HS256 con expiración de 24 horas
+- **Rate limiting** - Implementación custom en endpoints de login (10/min) y registro (5/min) por IP
+- **Aislamiento de datos** - Todas las queries filtran por `user_id`; `OwnershipValidator` protege recursos
+
+### Almacenamiento y datos
+
+- **Gestión de almacenamiento** - Límites por rol con tracking de uso; ADMIN sin límite, STANDARD con 512 MB
+- **Búsqueda sin acentos** - Extensión PostgreSQL `unaccent()` para buscar "cafe" y encontrar "café"
+- **Filtrado y ordenamiento avanzado** - Tracks y álbumes soportan búsqueda por texto, filtrado por artista/álbum, y sorting por título, artista, año o duración
+
+### Resiliencia y operaciones
+
+- **Transacciones reactivas** - `R2dbcConfig` provee un `TransactionalOperator` que se aplica en el registro de usuarios y en el borrado en cascada de artistas, garantizando atomicidad en la cadena de eliminaciones
+- **Manejo global de excepciones** - `GlobalExceptionHandler` (`@RestControllerAdvice`) mapea `ResourceNotFound` → 404, `ResourceAlreadyExists`/`DataIntegrityViolation` → 409, `StorageLimitExceeded` → 413, validaciones/`MethodArgumentTypeMismatch`/`DateTimeParse`/`NumberFormat`/`MissingServletRequestPart` → 400 con detalle, `SecurityException` (path traversal) → 500
+- **Apagado graceful** - Timeout de 30 segundos para cierre ordenado
+- **Health monitoring** - `StorageHealthIndicator` verifica espacio en disco + Actuator en puerto 8081 con `show-details: always`
+- **Build info en Actuator** - `spring-boot-maven-plugin` genera `build-info` durante el empaquetado, expuesto por `/actuator/info` junto a info de Java
+
+### Contenedor
+
+- **Ejecución no-root en contenedor** - Imagen basada en `appuser:appgroup` (UID/GID 1000); `entrypoint.sh` ajusta permisos de `/var/music-storage` y `/var/log/musicapp` y arranca la JVM vía `su-exec`
+
+---
+
+## Estructura del Proyecto
 
 Hexagonal por bounded contexts:
 
@@ -69,14 +112,20 @@ src/main/java/com/musicstreaming/
 │   ├── repository/ArtistRepository.java
 │   └── service/                             # ArtistService, ArtistLinkService
 └── common/                                  # Infraestructura compartida
-    ├── cache/                               # CacheConfig, CoverService (Caffeine)
-    ├── config/                              # SecurityConfig, RateLimitConfig, JwtSecretValidator, StorageHealthIndicator
+    ├── cache/                               # CacheConfig, CacheProperties, CoverService (Caffeine)
+    ├── config/                              # SecurityConfig, RateLimitConfig, RateLimitProperties,
+                                             # JwtSecretValidator, StorageHealthIndicator,
+                                             # R2dbcConfig, MultipartWebFluxConfig, StorageInitializer
     ├── dto/PageResponse.java                # Respuesta paginada genérica
-    ├── exception/                           # ResourceNotFoundException, ResourceAlreadyExistsException, UnauthorizedException, StorageLimitExceededException
+    ├── exception/                           # ResourceNotFoundException, ResourceAlreadyExistsException,
+                                             # UnauthorizedException, StorageLimitExceededException,
+                                             # BadRequestException
     ├── handler/GlobalExceptionHandler.java  # @RestControllerAdvice
     ├── security/                            # JwtTokenProvider, JwtAuthenticationFilter, ReactiveUserDetailsServiceImpl
     ├── service/                             # ReactiveFileService, ZipDownloadService
-    └── util/                                # FileUtils, ImageUtils, RangeHeaderParser, OwnershipValidator, SortHelper, JsonParamParser, ParserUtils, ResponseHeaderHelper
+    └── util/                                # FileUtils, FilenameSanitizer, ImageUtils, RangeHeaderParser,
+                                             # OwnershipValidator, SortHelper, MetadataParser,
+                                             # ResponseHeaderHelper
 ```
 
 ## Prerrequisitos
@@ -87,45 +136,40 @@ src/main/java/com/musicstreaming/
 
 ## Inicio Rápido
 
-### 1. Arrancar PostgreSQL
-
-Desde la raíz del proyecto (`ProyectoDAW/`):
+### Opción A — Backend en IDE + PostgreSQL en Docker (perfil `local`)
 
 ```bash
-docker compose -f docker-compose.local.yml up -d
-```
+# 1. Arrancar PostgreSQL
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres
 
-### 2. Configurar almacenamiento
+# 2. Crear el directorio de almacenamiento local (en perfil local NO lo crea el contenedor)
+mkdir music-storage
 
-En perfil `dev` corriendo el backend directo en Windows (sin Docker), los audios se guardan por defecto en `C:/temp/music-storage`. En `dev` y `prod` corriendo dentro de Docker, la ruta unificada es `/var/music/audio` (montada como volumen named `music_storage` y configurada vía `STORAGE_PATH` en `docker-compose.override.yml` / `docker-compose.prod.yml`). Creá la carpeta según cómo vayas a ejecutar:
-
-```bash
-mkdir C:/temp/music-storage
-```
-
-O cambialo en `application-dev.yml`:
-
-```yaml
-app:
-  storage:
-    base-path: tu/ruta/personalizada
-```
-
-### 3. Compilar y ejecutar
-
-```bash
+# 3. Arrancar el backend
 mvn spring-boot:run
 ```
 
-Activa el perfil `dev` por defecto. Para producción:
+Activa el perfil `local` por defecto. Para `dev`:
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=prod
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 La aplicación queda disponible en `http://localhost:8080`.
 
-## Endpoints API
+### Opción B — Stack dockerizado (`dev` / `prod`)
+
+```bash
+# Dev
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+# Prod (requiere JWT_SECRET, CORS_ORIGINS y CADDY_DOMAIN en el entorno)
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+En los perfiles dockerizados **no** hace falta crear el directorio de almacenamiento: el `entrypoint.sh` del backend crea `/var/music-storage` y le asigna los permisos correctos al usuario no-root antes de arrancar la JVM.
+
+## API Endpoints (Backend)
 
 ### Autenticación (`/api/auth`)
 
@@ -179,7 +223,7 @@ Requiere autenticación.
 
 | Método | Path | Descripción |
 |--------|------|-------------|
-| POST | `/api/tracks` | Subir track (multipart) |
+| POST | `/api/tracks` | Cargar track (multipart) |
 | GET | `/api/tracks` | Listar tracks (paginado, con filtros) |
 | GET | `/api/tracks/count` | Cantidad total de tracks |
 | GET | `/api/tracks/{id}` | Metadata del track |
@@ -299,13 +343,15 @@ Requiere autenticación.
 
 ### Actuator (Puerto 8081)
 
+`management.endpoint.health.show-details: always` expone el detalle de cada componente a cualquier consumidor (no requiere auth para `/health`).
+
 | Método | Path | Descripción | Auth |
 |--------|------|-------------|------|
-| GET | `/actuator/health` | Health check (incluye disco + R2DBC) | No |
+| GET | `/actuator/health` | Health check (incluye disco + R2DBC + componentes) | No |
 | GET | `/actuator/health/liveness` | Probe de Liveness (K8s) | No |
 | GET | `/actuator/health/readiness` | Probe de Readiness (K8s) | No |
 | GET | `/actuator/prometheus` | Métricas Prometheus | Sí |
-| GET | `/actuator/info` | Info de la aplicación | Sí |
+| GET | `/actuator/info` | Info de la aplicación (incluye `build-info` con versión, grupo, artefacto y timestamp de build) | Sí |
 | GET | `/actuator/metrics` | Métricas de la aplicación | Sí |
 
 > El límite de subida (500 MB) se aplica vía `MultipartWebFluxConfig`, que lee `app.storage.max-file-size` y configura el `MultipartHttpMessageReader` de WebFlux. En stack reactivo, `spring.servlet.multipart.*` **no se aplica** y debe ignorarse.
@@ -335,6 +381,7 @@ album_artists      (id, album_id, artist_id, position, created_at)
 - Para endpoints de streaming (`/stream`): también acepta `?token=` como query param (para players HTML)
 - **Passwords**: Hasheados con BCrypt
 - **Aislamiento**: Todas las queries filtran por `user_id`
+- **Registro transaccional**: el alta de un usuario corre dentro de un `TransactionalOperator` (ver `R2dbcConfig`); un `DataIntegrityViolationException` por username/email duplicado se traduce a `ResourceAlreadyExistsException` (409)
 
 **Roles:**
 
@@ -349,14 +396,14 @@ album_artists      (id, album_id, artist_id, position, created_at)
 
 - Sin header `Range`: archivo completo
 - Con `Range: bytes=0-1023`: primeros 1024 bytes
-- Usa `RandomAccessFile` + `Flux.generate` para lectura por chunks (64KB random, 256KB secuencial)
+- Usa `RandomAccessFile` + `Flux.generate` para lectura por chunks (64 KB random, 256 KB secuencial)
 - `subscribeOn(Schedulers.boundedElastic())` para no bloquear el event loop de Netty
 - `ZeroCopyHttpOutputMessage` cuando está disponible (zero-copy transfer)
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
-     -H "Range: bytes=0-1048575" \
-     http://localhost:8080/api/tracks/1/stream
+  -H "Range: bytes=0-1048575" \
+  http://localhost:8080/api/tracks/1/stream
 ```
 
 ## Caché
@@ -371,111 +418,87 @@ Cobertura de imágenes vía **Caffeine** con TTL de 1 hora:
 | `artistTrackCoverCache` | 300 | Portadas de tracks por artista |
 | `fileMetadataCache` | 2000 | MIME types y tamaños de archivos |
 
-## Configuración
+## Configuración y Despliegue
+
+Las tablas de esta sección se mantienen sincronizadas con el `README.md` de la raíz del proyecto. Se repiten aquí para que el backend sea consultable de forma autónoma.
 
 ### Variables de Entorno
 
-| Variable | Default (dev) | Default (prod) | Descripción |
-|----------|---------------|----------------|-------------|
-| `DB_HOST` | localhost | (sin default) | Host PostgreSQL |
-| `DB_PORT` | 5432 | (sin default) | Puerto PostgreSQL |
-| `DB_NAME` | musicdb | (sin default) | Nombre de base de datos |
-| `DB_USER` | postgres | (sin default) | Usuario PostgreSQL |
-| `DB_PASSWORD` | postgres | (sin default) | Contraseña PostgreSQL |
-| `JWT_SECRET` | placeholder genérico (mín 32 chars) | **requerido** (falla sin env) | Secreto para firmar JWT HS256 |
-| `STORAGE_PATH` | `C:/temp/music-storage` (sin Docker) / `/var/music/audio` (con Docker) | `/var/music/audio` | Ruta de almacenamiento de archivos |
-| `CORS_ORIGINS` | `http://localhost:5173` | **requerido** (falla sin env) | Orígenes CORS permitidos (separados por coma) |
-| `SPRING_PROFILES_ACTIVE` | `dev` | `prod` | Perfil Spring activo |
+| Variable | Default local/dev | Obligatoria en prod | Descripción |
+|---|---|---|---|
+| `DB_HOST` | `localhost` | – | Host de PostgreSQL (en Docker se sobrescribe a `postgres`) |
+| `DB_PORT` | `5432` | – | Puerto de PostgreSQL |
+| `DB_NAME` | `musicdb` | – | Nombre de la base de datos |
+| `DB_USER` | `postgres` | – | Usuario PostgreSQL |
+| `DB_PASSWORD` | `postgres` | – | Contraseña PostgreSQL |
+| `STORAGE_PATH` | `/var/music-storage` (Docker, gestionado por `entrypoint.sh`) / `./music-storage` (IDE, crearlo manualmente) | – | Path de almacenamiento de audios |
+| `SPRING_PROFILES_ACTIVE` | `local` | – | `local` \| `dev` \| `prod` |
+| `JWT_SECRET` | dev key (mín. 32 caracteres) | sí | Secreto HS256 para firmar JWT |
+| `CORS_ORIGINS` | `http://localhost:5173` (local) / `http://localhost` (dev) | sí | Orígenes CORS separados por coma |
 
-> El archivo `back_proyecto/.env.example` contiene el mismo set de variables con valores de muestra para dev local sin Docker.
-
-### Mapa: dónde se setea cada variable → dónde se lee
-
-| Variable | Fuentes posibles (en orden de prioridad) | Lectura |
-|----------|------------------------------------------|---------|
-| `SPRING_PROFILES_ACTIVE` | `docker-compose.override.yml`, `docker-compose.prod.yml`, env shell, raíz `.env` | `application.yml` → `spring.profiles.active` |
-| `JWT_SECRET` | `docker-compose.override.yml` (dev), `docker-compose.prod.yml` (prod, requerido), env shell | `application-dev.yml` / `application-prod.yml` → `app.jwt.secret` → `JwtTokenProvider`, `JwtSecretValidator` |
-| `STORAGE_PATH` | `docker-compose.override.yml` (`/var/music/audio`), `docker-compose.prod.yml` (`/var/music/audio`), env shell | `application-dev.yml` / `application-prod.yml` → `app.storage.base-path` → `ReactiveFileService`, `StorageService`, `CoverService`, `StorageHealthIndicator` |
-| `CORS_ORIGINS` | `docker-compose.override.yml`, `docker-compose.prod.yml` (requerido), env shell | `application-dev.yml` / `application-prod.yml` → `app.cors.allowed-origins` → `SecurityConfig` |
-| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | raíz `.env` (default `musicdb` / `postgres` / `postgres`), `docker-compose.yml`, env shell | `application.yml` → `spring.r2dbc.{name,username,password}` |
-| `DB_HOST` / `DB_PORT` | `docker-compose.yml` (prod → `postgres:5432`), env shell | `application.yml` → `spring.r2dbc.url` |
-
-### Perfiles
+### Perfiles Spring
 
 | Perfil | Descripción |
-|--------|-------------|
-| **dev** | Pool R2DBC chico (2-5 conexiones), log DEBUG, `app.jwt.secret` con default, `app.storage.base-path` en `C:/temp/music-storage`, `app.cors.allowed-origins` con default `http://localhost:5173` |
-| **prod** | Pool R2DBC grande (10-50 conexiones, acquisition-timeout 5s), log INFO con rotación (50MB × 30, cap 1GB), timeouts Netty (10s connect, 60s idle), `bootstrap-mode: deferred`, `app.jwt.secret` y `app.cors.allowed-origins` **requeridos** sin default, `app.storage.base-path` con default `/var/music/audio` |
+|---|---|
+| **local** | Default. Conexión a `${DB_HOST:localhost}:${DB_PORT:5432}`. Pool R2DBC 2–5, `max-idle-time 30s`, `max-life-time 1800s`. Defaults permisivos para JWT y CORS (IDE). Log DEBUG para `com.musicstreaming` y `org.springframework.security`. |
+| **dev** | Stack dockerizado, conexión a `postgres:5432` en la red Docker. Mismo pool que local. `CORS_ORIGINS` default `http://localhost` (frontend en puerto 80 dentro de Docker). Log DEBUG. |
+| **prod** | Pool R2DBC 10–50, `acquisition-timeout 5s`. `server.netty.connection-timeout 10s`, `idle-timeout 60s`. `JWT_SECRET` y `CORS_ORIGINS` **obligatorios** (la app falla al arrancar si faltan). Log INFO → `/var/log/musicapp/application.log` con rotación 50 MB × 30, cap 1 GB. |
 
-### Configuración de puertos
+### Puertos Publicados
 
-| Puerto | Servicio |
-|--------|----------|
-| 8080 | Aplicación principal (API + endpoints públicos) |
-| 8081 | Actuator (health, metrics, prometheus) — interno, **no expuesto al host** por `docker-compose.yml` base |
-
-> En `docker-compose.yml` base, el puerto 8081 queda dentro de la red Docker (accesible solo desde otros contenedores). Si necesitás exponerlo al host (por ejemplo, para Prometheus local), agregá el mapping `8081:8081` en `docker-compose.override.yml`.
+| Puerto | Servicio | Entorno |
+|---|---|---|
+| 5432 | PostgreSQL | local, dev, prod |
+| 8080 | Backend (API) | dev, prod |
+| 8081 | Backend (Actuator) | dev, prod |
+| 80 | Frontend (Nginx) | dev, prod |
+| 80, 443 | Caddy (HTTPS) | solo prod |
 
 > El esquema de la base de datos (`src/main/resources/schema.sql`) se inicializa montando el archivo en `/docker-entrypoint-initdb.d/` del contenedor de PostgreSQL, no por Spring. Se ejecuta una sola vez, la primera vez que se crea el volumen de datos.
 
 ## Docker
 
-### docker-compose.yml
+| Entorno | Comando |
+|---|---|
+| `local` | `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres` |
+| `dev` | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up` |
+| `prod` | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` |
 
-Los archivos docker-compose están en la raíz del proyecto (`ProyectoDAW/`):
+Archivos Docker relevantes:
 
 | Archivo | Propósito |
-|---------|-----------|
-| `docker-compose.yml` | Base: definición de servicios (postgres, backend, frontend) |
-| `docker-compose.override.yml` | Dev: se carga automático con `docker compose up` |
-| `docker-compose.prod.yml` | Prod: se usa con `-f docker-compose.yml -f docker-compose.prod.yml` |
-| `docker-compose.local.yml` | Local: solo PostgreSQL, sin apps dockerizadas |
+|---|---|
+| `docker-compose.yml` | Base: definición común de servicios |
+| `docker-compose.local.yml` | Local: solo PostgreSQL, apps en el host con IDE |
+| `docker-compose.dev.yml` | Dev: stack completo dockerizado |
+| `docker-compose.prod.yml` | Prod: stack completo + Caddy con TLS automático |
+| `infra/caddy/Caddyfile` | Reverse proxy con HTTPS automático |
+| `back_proyecto/Dockerfile` | Multi-stage: Maven build → `eclipse-temurin:21-jre-alpine` con usuario no-root |
+| `back_proyecto/entrypoint.sh` | Prepara `/var/music-storage` y `/var/log/musicapp`; cambia ownership a `appuser:appgroup` y arranca la JVM vía `su-exec` |
+| `front_proyecto/Dockerfile` | Multi-stage: Node 22 build → Nginx Alpine |
+| `front_proyecto/nginx.conf` | SPA fallback, proxy `/api/` → backend, gzip, caché inmutable, CSP estricta |
 
-**docker-compose.yml (base):**
+### Dockerfile del backend (multi-stage)
 
-```yaml
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${DB_NAME:-musicdb}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./back_proyecto/src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+- **Stage 1 — `maven:3.9-eclipse-temurin-21`**: descarga dependencias offline, compila con `mvn package -DskipTests -B` y produce `target/app.jar`.
+- **Stage 2 — `eclipse-temurin:21-jre-alpine`**:
+  - Crea grupo y usuario no-root `appuser:appgroup` (UID/GID 1000)
+  - Instala `su-exec` y `wget` desde apk
+  - Pre-crea `/var/music-storage` y `/var/log/musicapp` con ownership correcto
+  - Copia `app.jar` y `entrypoint.sh` (chmod 755)
+  - `EXPOSE 8080 8081`
+  - `ENTRYPOINT ["/entrypoint.sh"]`, `CMD ["java", "-jar", "app.jar"]`
 
-  backend:
-    build: ./back_proyecto
-    ports:
-      - "8080:8080"
-      - "8081:8081"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  frontend:
-    build:
-      context: ./front_proyecto
-      args:
-        VITE_API_URL: /api
-    ports:
-      - "80:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-
-volumes:
-  postgres_data:
-```
-
-### Construir y ejecutar
-
-Desde la raíz del proyecto (`ProyectoDAW/`):
+### entrypoint.sh
 
 ```bash
-docker compose up --build -d
+STORAGE_PATH="${STORAGE_PATH:-/var/music-storage}"
+mkdir -p "$STORAGE_PATH" && chown -R appuser:appgroup "$STORAGE_PATH"
+mkdir -p /var/log/musicapp && chown -R appuser:appgroup /var/log/musicapp
+exec su-exec appuser:appgroup "$@"
 ```
+
+El contenedor siempre arranca como root para poder crear y asignar permisos a los volúmenes, pero cede el control al usuario `appuser` antes de lanzar la JVM.
 
 ## Ejemplos de Uso
 
@@ -497,7 +520,7 @@ curl -X POST http://localhost:8080/api/auth/login \
 # → {"token":"eyJhbGciOiJIUzI1NiJ9...", "tokenType":"Bearer", "expiresIn":86400000, "user":{...}}
 ```
 
-### Subir track
+### Cargar track
 
 ```bash
 curl -X POST http://localhost:8080/api/tracks \
@@ -574,7 +597,7 @@ curl -H "Authorization: Bearer <token>" \
 # → {"usedBytes":1048576,"limitBytes":536870912,"availableBytes":535822336,"roleName":"STANDARD"}
 ```
 
-## Desarrollo
+## Scripts
 
 ```bash
 # Compilar
@@ -584,5 +607,12 @@ mvn clean compile
 mvn clean package -DskipTests
 
 # Ejecutar JAR
-java -jar target/music-streaming-backend-1.0.0-SNAPSHOT.jar
+java -jar target/app.jar
 ```
+
+---
+
+## Documentación relacionada
+
+- Volver al [índice principal](../README.md)
+- Ver también: [Frontend README](../front_proyecto/README.md)

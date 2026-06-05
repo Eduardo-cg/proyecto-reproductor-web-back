@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +25,7 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/api/artists")
 @RequiredArgsConstructor
 @Validated
+@Slf4j
 public class ArtistController {
 
     private final ArtistService artistService;

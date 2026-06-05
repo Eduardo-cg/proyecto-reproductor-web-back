@@ -3,8 +3,11 @@ package com.musicstreaming.album.repository;
 import com.musicstreaming.album.entity.AlbumTrack;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.data.repository.query.Param;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.Collection;
 
 public interface AlbumTrackRepository extends R2dbcRepository<AlbumTrack, Long> {
 
@@ -18,4 +21,10 @@ public interface AlbumTrackRepository extends R2dbcRepository<AlbumTrack, Long> 
 
     @Query("SELECT track_id FROM album_tracks")
     Flux<Long> findAllTrackIds();
+
+    @Query("SELECT COUNT(*) FROM album_tracks WHERE track_id = :trackId")
+    Mono<Long> countByTrackId(Long trackId);
+
+    @Query("SELECT * FROM album_tracks WHERE album_id IN (:albumIds)")
+    Flux<AlbumTrack> findByAlbumIdIn(@Param("albumIds") Collection<Long> albumIds);
 }

@@ -1,17 +1,19 @@
 package com.musicstreaming.album.controller;
 
 import com.musicstreaming.album.dto.AlbumDTO;
+import com.musicstreaming.album.dto.AlbumMetadata;
 import com.musicstreaming.album.dto.AlbumWithTracksDTO;
 import com.musicstreaming.album.service.AlbumService;
 import com.musicstreaming.auth.dto.UserPrincipal;
 import com.musicstreaming.common.dto.PageResponse;
-import com.musicstreaming.common.util.ParserUtils;
-import com.musicstreaming.common.util.JsonParamParser;
+import com.musicstreaming.common.util.MetadataParser;
 import com.musicstreaming.track.dto.TrackDTO;
+import com.musicstreaming.track.dto.TrackMetadata;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +30,7 @@ import java.util.List;
 @RequestMapping("/api/albums")
 @RequiredArgsConstructor
 @Validated
+@Slf4j
 public class AlbumController {
 
     private final AlbumService albumService;
@@ -40,8 +43,13 @@ public class AlbumController {
             @RequestPart(value = "releaseDate", required = false) String releaseDateStr,
             @RequestPart(value = "cover", required = false) FilePart cover) {
 
-        return albumService.createAlbum(title, JsonParamParser.parseLongList(artistIdsJson),
-                        ParserUtils.parseOptionalDate(releaseDateStr), cover, principal.getId())
+        AlbumMetadata meta = new AlbumMetadata(
+                title,
+                MetadataParser.parseLongList(artistIdsJson),
+                MetadataParser.parseOptionalDate(releaseDateStr)
+        );
+
+        return albumService.createAlbum(meta, cover, principal.getId())
                 .map(album -> ResponseEntity.status(HttpStatus.CREATED).body(album));
     }
 
@@ -87,8 +95,13 @@ public class AlbumController {
             @RequestPart(value = "releaseDate", required = false) String releaseDateStr,
             @RequestPart(value = "cover", required = false) FilePart cover) {
 
-        return albumService.updateAlbum(id, title, JsonParamParser.parseLongList(artistIdsJson),
-                        ParserUtils.parseOptionalDate(releaseDateStr), cover, principal.getId())
+        AlbumMetadata meta = new AlbumMetadata(
+                title,
+                MetadataParser.parseLongList(artistIdsJson),
+                MetadataParser.parseOptionalDate(releaseDateStr)
+        );
+
+        return albumService.updateAlbum(id, meta, cover, principal.getId())
                 .map(ResponseEntity::ok);
     }
 
@@ -119,9 +132,16 @@ public class AlbumController {
             @RequestPart(value = "position", required = false) String positionStr,
             @RequestPart(value = "releaseDate", required = false) String releaseDateStr) {
 
-        return albumService.addTrackToAlbum(
-                        id, title, JsonParamParser.parseLongList(artistIdsJson), Integer.valueOf(duration), file,
-                        ParserUtils.parseOptionalInt(positionStr), ParserUtils.parseOptionalDate(releaseDateStr), principal.getId())
+        TrackMetadata meta = new TrackMetadata(
+                title,
+                MetadataParser.parseLongList(artistIdsJson),
+                null,
+                MetadataParser.parseRequiredInt(duration, "duration"),
+                MetadataParser.parseOptionalInt(positionStr),
+                MetadataParser.parseOptionalDate(releaseDateStr)
+        );
+
+        return albumService.addTrackToAlbum(id, meta, file, principal.getId())
                 .map(track -> ResponseEntity.status(HttpStatus.CREATED).body(track));
     }
 

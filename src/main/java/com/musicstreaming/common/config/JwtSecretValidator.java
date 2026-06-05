@@ -1,7 +1,6 @@
 package com.musicstreaming.common.config;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -10,9 +9,9 @@ import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 @Component
+@Slf4j
 public class JwtSecretValidator {
 
-    private static final Logger log = LoggerFactory.getLogger(JwtSecretValidator.class);
     private static final String DEFAULT_SECRET = "your-256-bit-secret-key-here-must-be-at-least-32-characters-long";
 
     private final ConfigurableEnvironment environment;
@@ -31,8 +30,8 @@ public class JwtSecretValidator {
                 log.error("Cannot start in production with the default JWT secret. Set the JWT_SECRET environment variable with a secure 256-bit key.");
                 throw new IllegalStateException(
                         "JWT_SECRET environment variable must be set in production. " +
-                        "The default insecure secret is not allowed. " +
-                        "Set the JWT_SECRET environment variable with a secure 256-bit key.");
+                                "The default insecure secret is not allowed. " +
+                                "Set the JWT_SECRET environment variable with a secure 256-bit key.");
             }
             if (jwtSecret.length() < 32) {
                 log.error("JWT secret is too short. Must be at least 32 characters for HS256 security.");

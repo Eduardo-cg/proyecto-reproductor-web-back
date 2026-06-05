@@ -7,12 +7,6 @@ spring:
       max-life-time: 1800s
       acquisition-timeout: 5s
       validation-query: SELECT 1
-  data:
-    r2dbc:
-      repositories:
-        bootstrap-mode: deferred
-  # NOTE: schema.sql is mounted into PostgreSQL via docker-compose (see ../docker-compose.yml),
-  # so it is NOT initialized by Spring's spring.sql.init on app startup.
 
 server:
   netty:
@@ -23,14 +17,9 @@ app:
   jwt:
     secret: ${JWT_SECRET:?JWT_SECRET es obligatorio en produccion}
   storage:
-    base-path: ${STORAGE_PATH:/var/music/audio}
+    base-path: ${STORAGE_PATH:/var/music-storage}
   cors:
     allowed-origins: ${CORS_ORIGINS:?CORS_ORIGINS es obligatorio en produccion}
-
-management:
-  info:
-    java:
-      enabled: true
 
 logging:
   level:

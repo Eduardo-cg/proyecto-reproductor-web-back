@@ -2,14 +2,15 @@ package com.musicstreaming.track.controller;
 
 import com.musicstreaming.auth.dto.UserPrincipal;
 import com.musicstreaming.common.dto.PageResponse;
-import com.musicstreaming.common.util.JsonParamParser;
-import com.musicstreaming.common.util.ParserUtils;
+import com.musicstreaming.common.util.MetadataParser;
 import com.musicstreaming.track.dto.TrackDTO;
+import com.musicstreaming.track.dto.TrackMetadata;
 import com.musicstreaming.track.service.TrackService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,7 @@ import java.util.List;
 @RequestMapping("/api/tracks")
 @RequiredArgsConstructor
 @Validated
+@Slf4j
 public class TrackController {
 
     private final TrackService trackService;
@@ -41,16 +43,16 @@ public class TrackController {
             @RequestPart(value = "cover", required = false) FilePart cover,
             @RequestPart(value = "releaseDate", required = false) String releaseDateStr) {
 
-        return trackService.uploadTrack(
-                        title,
-                        JsonParamParser.parseLongList(artistIdsJson),
-                        album,
-                        Integer.valueOf(duration),
-                        file,
-                        cover,
-                        principal.getId(),
-                        ParserUtils.parseOptionalDate(releaseDateStr)
-                )
+        TrackMetadata meta = new TrackMetadata(
+                title,
+                MetadataParser.parseLongList(artistIdsJson),
+                album,
+                MetadataParser.parseRequiredInt(duration, "duration"),
+                null,
+                MetadataParser.parseOptionalDate(releaseDateStr)
+        );
+
+        return trackService.uploadTrack(meta, file, cover, principal.getId())
                 .map(track -> ResponseEntity.status(HttpStatus.CREATED).body(track));
     }
 
@@ -94,8 +96,16 @@ public class TrackController {
             @RequestPart(value = "releaseDate", required = false) String releaseDateStr,
             @RequestPart(value = "cover", required = false) FilePart cover) {
 
-        return trackService.updateTrack(id, title, JsonParamParser.parseLongList(artistIdsJson),
-                        album, ParserUtils.parseOptionalDate(releaseDateStr), cover, principal.getId())
+        TrackMetadata meta = new TrackMetadata(
+                title,
+                MetadataParser.parseLongList(artistIdsJson),
+                album,
+                null,
+                null,
+                MetadataParser.parseOptionalDate(releaseDateStr)
+        );
+
+        return trackService.updateTrack(id, meta, cover, principal.getId())
                 .map(ResponseEntity::ok);
     }
 

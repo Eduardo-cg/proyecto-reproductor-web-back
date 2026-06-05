@@ -4,7 +4,6 @@ import com.musicstreaming.auth.dto.LoginResponse;
 import com.musicstreaming.auth.dto.RegisterRequest;
 import com.musicstreaming.auth.dto.UserPrincipal;
 import com.musicstreaming.auth.dto.UserResponse;
-import com.musicstreaming.auth.entity.Role;
 import com.musicstreaming.auth.entity.User;
 import com.musicstreaming.auth.repository.RoleRepository;
 import com.musicstreaming.auth.repository.UserRepository;
@@ -12,23 +11,25 @@ import com.musicstreaming.common.exception.ResourceAlreadyExistsException;
 import com.musicstreaming.common.exception.ResourceNotFoundException;
 import com.musicstreaming.common.exception.UnauthorizedException;
 import com.musicstreaming.common.security.JwtTokenProvider;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 
 @Service
+@Slf4j
 public class AuthService {
 
-    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final String STANDARD_ROLE_NAME = "STANDARD";
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final TransactionalOperator transactionalOperator;
 
     @Value("${app.jwt.expiration}")
     private long jwtExpiration;
@@ -36,25 +37,27 @@ public class AuthService {
     public AuthService(UserRepository userRepository,
                        RoleRepository roleRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtTokenProvider jwtTokenProvider) {
+                       JwtTokenProvider jwtTokenProvider,
+                       TransactionalOperator transactionalOperator) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.transactionalOperator = transactionalOperator;
     }
 
     public Mono<UserResponse> register(RegisterRequest request) {
-        return roleRepository.findByName(STANDARD_ROLE_NAME)
+        Mono<UserResponse> work = roleRepository.findByName(STANDARD_ROLE_NAME)
                 .switchIfEmpty(Mono.error(new ResourceNotFoundException("Role", STANDARD_ROLE_NAME)))
                 .flatMap(role -> userRepository.existsByUsername(request.getUsername())
                         .flatMap(exists -> {
-                            if (exists) {
+                            if (Boolean.TRUE.equals(exists)) {
                                 return Mono.error(new ResourceAlreadyExistsException("Username already exists"));
                             }
                             return userRepository.existsByEmail(request.getEmail());
                         })
                         .flatMap(exists -> {
-                            if (exists) {
+                            if (Boolean.TRUE.equals(exists)) {
                                 return Mono.error(new ResourceAlreadyExistsException("Email already exists"));
                             }
                             User user = new User(
@@ -65,8 +68,12 @@ public class AuthService {
                             user.setRoleId(role.getId());
                             return userRepository.save(user);
                         })
-                        .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), STANDARD_ROLE_NAME))
-                        .doOnSuccess(u -> log.info("User registered userId={} username={}", u.getId(), u.getUsername())));
+                        .map(user -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), STANDARD_ROLE_NAME)));
+
+        return transactionalOperator.transactional(work)
+                .onErrorMap(DataIntegrityViolationException.class,
+                        e -> new ResourceAlreadyExistsException("Username or email already exists"))
+                .doOnSuccess(u -> log.info("User registered userId={} username={}", u.getId(), u.getUsername()));
     }
 
     public Mono<LoginResponse> login(String username, String password) {
@@ -103,6 +110,10 @@ public class AuthService {
         return userRepository.findById(userId)
                 .switchIfEmpty(Mono.error(new ResourceNotFoundException("User", userId)))
                 .flatMap(user -> roleRepository.findById(user.getRoleId())
-                        .map(role -> new UserResponse(user.getId(), user.getUsername(), user.getEmail(), role.getName())));
+                        .map(role -> {
+                            user.touchUpdated();
+                            userRepository.save(user).subscribe();
+                            return new UserResponse(user.getId(), user.getUsername(), user.getEmail(), role.getName());
+                        }));
     }
 }

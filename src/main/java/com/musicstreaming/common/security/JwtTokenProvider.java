@@ -4,8 +4,7 @@ import com.musicstreaming.auth.dto.UserPrincipal;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -14,9 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
 @Component
+@Slf4j
 public class JwtTokenProvider {
-
-    private static final Logger log = LoggerFactory.getLogger(JwtTokenProvider.class);
 
     @Value("${app.jwt.secret}")
     private String jwtSecret;

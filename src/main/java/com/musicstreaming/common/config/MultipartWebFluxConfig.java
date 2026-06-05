@@ -1,5 +1,6 @@
 package com.musicstreaming.common.config;
 
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,7 +22,7 @@ public class MultipartWebFluxConfig {
     public WebFluxConfigurer multipartWebFluxConfigurer() {
         return new WebFluxConfigurer() {
             @Override
-            public void configureHttpMessageCodecs(ServerCodecConfigurer configurer) {
+            public void configureHttpMessageCodecs(@NonNull ServerCodecConfigurer configurer) {
                 DefaultPartHttpMessageReader partReader = new DefaultPartHttpMessageReader();
                 partReader.setMaxInMemorySize(DEFAULT_IN_MEMORY_SIZE_BYTES);
                 partReader.setMaxDiskUsagePerPart(maxFileSize);

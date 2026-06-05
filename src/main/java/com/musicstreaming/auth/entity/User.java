@@ -41,4 +41,8 @@ public class User {
         this.email = email;
         this.passwordHash = passwordHash;
     }
+
+    public void touchUpdated() {
+        this.updatedAt = LocalDateTime.now();
+    }
 }

@@ -3,6 +3,8 @@ package com.musicstreaming.artist.service;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.musicstreaming.album.dto.AlbumDTO;
 import com.musicstreaming.album.entity.Album;
+import com.musicstreaming.album.entity.AlbumArtist;
+import com.musicstreaming.album.entity.AlbumTrack;
 import com.musicstreaming.album.repository.AlbumArtistRepository;
 import com.musicstreaming.album.repository.AlbumRepository;
 import com.musicstreaming.album.repository.AlbumTrackRepository;
@@ -15,35 +17,32 @@ import com.musicstreaming.common.exception.ResourceAlreadyExistsException;
 import com.musicstreaming.common.service.ReactiveFileService;
 import com.musicstreaming.common.service.ZipDownloadService;
 import com.musicstreaming.common.util.FileUtils;
+import com.musicstreaming.common.util.FilenameSanitizer;
 import com.musicstreaming.common.util.OwnershipValidator;
 import com.musicstreaming.track.dto.TrackDTO;
 import com.musicstreaming.track.entity.Track;
+import com.musicstreaming.track.entity.TrackArtist;
 import com.musicstreaming.track.repository.TrackArtistRepository;
 import com.musicstreaming.track.repository.TrackRepository;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ArtistService {
-
-    private static final Logger log = LoggerFactory.getLogger(ArtistService.class);
 
     private final ArtistRepository artistRepository;
     private final TrackArtistRepository trackArtistRepository;
@@ -54,6 +53,7 @@ public class ArtistService {
     private final ReactiveFileService reactiveFileService;
     private final CoverService coverService;
     private final ZipDownloadService zipDownloadService;
+    private final TransactionalOperator transactionalOperator;
     private final Cache<Long, byte[]> artistImageCache;
     private final Cache<Long, byte[]> artistTrackCoverCache;
 
@@ -135,7 +135,6 @@ public class ArtistService {
                     }
                     return artistRepository.save(artist);
                 }))
-                .cast(Artist.class)
                 .flatMap(this::artistToDto)
                 .doOnSuccess(a -> log.info("Artist created userId={} artistId={} name={}", userId, a.getId(), a.getName()));
     }
@@ -158,14 +157,15 @@ public class ArtistService {
     public Mono<Void> deleteArtist(Long artistId, Long userId) {
         return OwnershipValidator.requireOwnership(
                         artistRepository.findById(artistId), userId, "Artist", artistId, Artist::getUserId)
-                .flatMap(artist ->
-                        cascadeDeleteArtistTracks(artistId)
-                                .then(cascadeDeleteArtistAlbums(artistId))
-                                .then(trackArtistRepository.deleteByArtistId(artistId))
-                                .then(albumArtistRepository.deleteByArtistId(artistId))
-                                .then(cleanupArtistImage(artist))
-                                .then(artistRepository.deleteById(artistId))
-                )
+                .flatMap(artist -> {
+                    Mono<Void> work = cascadeDeleteArtistTracks(artistId)
+                            .then(cascadeDeleteArtistAlbums(artistId))
+                            .then(trackArtistRepository.deleteByArtistId(artistId))
+                            .then(albumArtistRepository.deleteByArtistId(artistId))
+                            .then(cleanupArtistImage(artist))
+                            .then(artistRepository.deleteById(artistId));
+                    return transactionalOperator.transactional(work);
+                })
                 .doOnSuccess(v -> log.info("Artist cascade deleted userId={} artistId={}", userId, artistId));
     }
 
@@ -247,16 +247,16 @@ public class ArtistService {
     }
 
     private Mono<Void> deleteSingleAlbum(Long albumId) {
-        return albumRepository.findById(albumId)
-                .flatMap(album -> {
-                    Mono<Void> deleteCover = Mono.empty();
-                    if (album.getCoverPath() != null) {
-                        deleteCover = reactiveFileService.deleteFile(reactiveFileService.resolvePath(album.getCoverPath()));
-                    }
-                    return deleteCover
-                            .then(albumArtistRepository.deleteByAlbumId(albumId))
-                            .then(deleteAlbumTracks(album));
-                })
+        return albumArtistRepository.countByAlbumId(albumId)
+                .flatMap(artistCount -> albumRepository.findById(albumId)
+                        .flatMap(album -> {
+                            Mono<Void> deleteCover = (artistCount <= 1 && album.getCoverPath() != null)
+                                    ? reactiveFileService.deleteFile(reactiveFileService.resolvePath(album.getCoverPath()))
+                                    : Mono.empty();
+                            return deleteCover
+                                    .then(albumArtistRepository.deleteByAlbumId(albumId))
+                                    .then(deleteAlbumTracks(album));
+                        }))
                 .onErrorResume(e -> {
                     log.warn("Could not delete album {} during cascade: {}", albumId, e.getMessage());
                     return Mono.empty();
@@ -307,14 +307,9 @@ public class ArtistService {
                 .flatMap(artist -> {
                     Pageable pageable = PageRequest.of(page, size);
                     Mono<List<TrackDTO>> content = trackArtistRepository.findByArtistId(artistId, pageable)
-                            .concatMap(ta -> trackRepository.findById(ta.getTrackId()))
+                            .map(TrackArtist::getTrackId)
                             .collectList()
-                            .flatMap(tracks -> {
-                                List<Mono<TrackDTO>> dtos = tracks.stream()
-                                        .map(this::trackToDto)
-                                        .toList();
-                                return Flux.concat(dtos).collectList();
-                            });
+                            .flatMap(this::buildTracksWithArtistsBatch);
                     Mono<Long> total = trackArtistRepository.countByArtistId(artistId);
                     return Mono.zip(content, total,
                             (tracks, totalElements) -> PageResponse.of(tracks, totalElements, page, size));
@@ -327,63 +322,149 @@ public class ArtistService {
                 .flatMap(artist -> {
                     Pageable pageable = PageRequest.of(page, size);
                     Mono<List<AlbumDTO>> content = albumArtistRepository.findByArtistId(artistId, pageable)
-                            .concatMap(aa -> albumRepository.findById(aa.getAlbumId()))
+                            .map(AlbumArtist::getAlbumId)
                             .collectList()
-                            .flatMap(albums -> {
-                                List<Mono<AlbumDTO>> dtos = albums.stream()
-                                        .map(this::albumToSimpleDto)
-                                        .toList();
-                                return Flux.concat(dtos).collectList();
-                            });
+                            .flatMap(this::buildAlbumsWithArtistsBatch);
                     Mono<Long> total = albumArtistRepository.countByArtistId(artistId);
                     return Mono.zip(content, total,
                             (albums, totalElements) -> PageResponse.of(albums, totalElements, page, size));
                 });
     }
 
-    private Mono<TrackDTO> trackToDto(Track track) {
-        Mono<List<ArtistDTO>> artistsMono = trackArtistRepository.findByTrackIdOrderByPosition(track.getId())
-                .concatMap(ta -> artistRepository.findById(ta.getArtistId()))
+    private Mono<List<TrackDTO>> buildTracksWithArtistsBatch(List<Long> trackIds) {
+        if (trackIds.isEmpty()) {
+            return Mono.just(List.of());
+        }
+        return trackRepository.findAllById(trackIds)
                 .collectList()
-                .flatMap(this::artistListToDtoList);
+                .flatMap(tracks -> {
+                    Map<Long, Track> trackMap = new HashMap<>();
+                    for (Track t : tracks) {
+                        trackMap.put(t.getId(), t);
+                    }
+                    return trackArtistRepository.findByTrackIdIn(trackIds)
+                            .collectList()
+                            .flatMap(tas -> {
+                                Set<Long> artistIds = new HashSet<>();
+                                for (TrackArtist ta : tas) {
+                                    artistIds.add(ta.getArtistId());
+                                }
+                                Mono<Map<Long, Artist>> artistMapMono = artistIds.isEmpty()
+                                        ? Mono.just(Map.of())
+                                        : artistRepository.findAllById(artistIds)
+                                          .collectList()
+                                          .map(list -> {
+                                              Map<Long, Artist> m = new HashMap<>();
+                                              for (Artist a : list) {
+                                                  m.put(a.getId(), a);
+                                              }
+                                              return m;
+                                          });
 
-        return coverService.toBase64DataUri(track.getCoverPath(), track.getId(), artistTrackCoverCache)
-                .zipWith(artistsMono)
-                .map(tuple -> {
-                    TrackDTO dto = TrackDTO.fromEntity(track, tuple.getT1());
-                    dto.setArtists(tuple.getT2());
-                    return dto;
+                                return artistMapMono.map(artistMap -> {
+                                    Map<Long, List<Artist>> artistsByTrack = new HashMap<>();
+                                    for (TrackArtist ta : tas) {
+                                        Artist a = artistMap.get(ta.getArtistId());
+                                        if (a == null) continue;
+                                        artistsByTrack.computeIfAbsent(ta.getTrackId(), k -> new ArrayList<>())
+                                                .add(a);
+                                    }
+                                    return trackIds.stream()
+                                            .map(trackMap::get)
+                                            .filter(Objects::nonNull)
+                                            .map(t -> mapTrackToDtoBatch(t, artistsByTrack.getOrDefault(t.getId(), List.of())))
+                                            .toList();
+                                });
+                            });
                 });
     }
 
-    private Mono<List<ArtistDTO>> artistListToDtoList(List<Artist> artists) {
-        List<Mono<ArtistDTO>> dtos = artists.stream()
-                .map(a -> Mono.fromCallable(() -> {
-                    ArtistDTO adto = new ArtistDTO();
-                    adto.setId(a.getId());
-                    adto.setName(a.getName());
-                    return adto;
-                }))
+    private TrackDTO mapTrackToDtoBatch(Track track, List<Artist> artists) {
+        TrackDTO dto = TrackDTO.fromEntity(track, null);
+        List<ArtistDTO> artistDtos = artists.stream()
+                .map(this::toArtistDtoBlocking)
                 .toList();
-        return Flux.concat(dtos).collectList();
+        dto.setArtists(artistDtos);
+        return dto;
     }
 
-    private Mono<AlbumDTO> albumToSimpleDto(Album album) {
+    private ArtistDTO toArtistDtoBlocking(Artist artist) {
+        ArtistDTO adto = new ArtistDTO();
+        adto.setId(artist.getId());
+        adto.setName(artist.getName());
+        adto.setUserId(artist.getUserId());
+        return adto;
+    }
+
+    private Mono<List<AlbumDTO>> buildAlbumsWithArtistsBatch(List<Long> albumIds) {
+        if (albumIds.isEmpty()) {
+            return Mono.just(List.of());
+        }
+        return albumRepository.findAllById(albumIds)
+                .collectList()
+                .flatMap(albums -> {
+                    Map<Long, Album> albumMap = new HashMap<>();
+                    for (Album a : albums) {
+                        albumMap.put(a.getId(), a);
+                    }
+                    return albumArtistRepository.findByAlbumIdIn(albumIds)
+                            .collectList()
+                            .flatMap(aas -> {
+                                Set<Long> artistIds = new HashSet<>();
+                                for (AlbumArtist aa : aas) {
+                                    artistIds.add(aa.getArtistId());
+                                }
+                                Mono<Map<Long, Artist>> artistMapMono = artistIds.isEmpty()
+                                        ? Mono.just(Map.of())
+                                        : artistRepository.findAllById(artistIds)
+                                          .collectList()
+                                          .map(list -> {
+                                              Map<Long, Artist> m = new HashMap<>();
+                                              for (Artist a : list) {
+                                                  m.put(a.getId(), a);
+                                              }
+                                              return m;
+                                          });
+
+                                return Mono.zip(artistMapMono, albumTrackRepository.findByAlbumIdIn(albumIds).collectList())
+                                        .map(tuple -> {
+                                            Map<Long, Artist> artistMap = tuple.getT1();
+                                            List<AlbumTrack> albumTracks = tuple.getT2();
+                                            Map<Long, Integer> trackCountByAlbum = new HashMap<>();
+                                            for (AlbumTrack at : albumTracks) {
+                                                trackCountByAlbum.merge(at.getAlbumId(), 1, Integer::sum);
+                                            }
+                                            Map<Long, List<Artist>> artistsByAlbum = new HashMap<>();
+                                            for (AlbumArtist aa : aas) {
+                                                Artist a = artistMap.get(aa.getArtistId());
+                                                if (a == null) continue;
+                                                artistsByAlbum.computeIfAbsent(aa.getAlbumId(), k -> new ArrayList<>())
+                                                        .add(a);
+                                            }
+                                            return albumIds.stream()
+                                                    .map(albumMap::get)
+                                                    .filter(Objects::nonNull)
+                                                    .map(album -> mapAlbumToSimpleDtoBatch(album,
+                                                            artistsByAlbum.getOrDefault(album.getId(), List.of()),
+                                                            trackCountByAlbum.getOrDefault(album.getId(), 0)))
+                                                    .toList();
+                                        });
+                            });
+                });
+    }
+
+    private AlbumDTO mapAlbumToSimpleDtoBatch(Album album, List<Artist> artists, int trackCount) {
         AlbumDTO dto = new AlbumDTO();
         dto.setId(album.getId());
         dto.setTitle(album.getTitle());
         dto.setReleaseDate(album.getReleaseDate());
         dto.setUserId(album.getUserId());
-        Mono<List<ArtistDTO>> artistsMono = albumArtistRepository.findByAlbumIdOrderByPosition(album.getId())
-                .concatMap(aa -> artistRepository.findById(aa.getArtistId()))
-                .collectList()
-                .flatMap(this::artistListToDtoList);
-        Mono<Integer> countMono = albumTrackRepository.countByAlbumId(album.getId()).map(Long::intValue);
-        return Mono.zip(artistsMono, countMono, (artists, count) -> {
-            dto.setArtistsNames(artists);
-            dto.setTrackCount(count);
-            return dto;
-        });
+        dto.setTrackCount(trackCount);
+        List<ArtistDTO> artistDtos = artists.stream()
+                .map(this::toArtistDtoBlocking)
+                .toList();
+        dto.setArtistsNames(artistDtos);
+        return dto;
     }
 
     private record ArtistDownloadEntry(String zipPath, Path filePath) {
@@ -392,7 +473,7 @@ public class ArtistService {
     private record ArtistDownloadData(String artistName, List<ArtistDownloadEntry> entries) {
     }
 
-    public Mono<ArtistDownloadData> getArtistDownloadData(Long artistId, Long userId) {
+    private Mono<ArtistDownloadData> getArtistDownloadData(Long artistId, Long userId) {
         return OwnershipValidator.requireOwnership(
                         artistRepository.findById(artistId), userId, "Artist", artistId, Artist::getUserId)
                 .flatMap(artist -> {
@@ -403,7 +484,7 @@ public class ArtistService {
                         List<ArtistDownloadEntry> all = new ArrayList<>();
                         all.addAll(albums);
                         all.addAll(standalones);
-                        return new ArtistDownloadData(artist.getName(), all);
+                        return new ArtistDownloadData(FilenameSanitizer.sanitize(artist.getName()), all);
                     });
                 });
     }
@@ -414,7 +495,8 @@ public class ArtistService {
                 .flatMap(album -> albumTrackRepository.findByAlbumIdOrderByPosition(album.getId())
                         .concatMap(at -> trackRepository.findById(at.getTrackId())
                                 .map(track -> new ArtistDownloadEntry(
-                                        album.getTitle() + "/" + track.getTitle() + "."
+                                        FilenameSanitizer.sanitize(album.getTitle()) + "/"
+                                                + FilenameSanitizer.sanitize(track.getTitle()) + "."
                                                 + FileUtils.getExtension(track.getFilePath()),
                                         reactiveFileService.resolvePath(track.getFilePath())
                                 )))
@@ -431,7 +513,7 @@ public class ArtistService {
                             .filter(ta -> !albumTrackIdSet.contains(ta.getTrackId()))
                             .flatMap(ta -> trackRepository.findById(ta.getTrackId()))
                             .map(track -> new ArtistDownloadEntry(
-                                    track.getTitle() + "."
+                                    FilenameSanitizer.sanitize(track.getTitle()) + "."
                                             + FileUtils.getExtension(track.getFilePath()),
                                     reactiveFileService.resolvePath(track.getFilePath())
                             ))

@@ -1,18 +1,16 @@
 package com.musicstreaming.common.util;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.imageio.ImageIO;
-import java.awt.Graphics2D;
-import java.awt.Image;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+@Slf4j
 public final class ImageUtils {
 
-    private static final Logger log = LoggerFactory.getLogger(ImageUtils.class);
     private static final int MAX_DIMENSION = 800;
     private static final long MAX_SIZE_BYTES = 1_000_000;
 
@@ -43,26 +41,33 @@ public final class ImageUtils {
             int newWidth = (int) (width * scale);
             int newHeight = (int) (height * scale);
 
-            BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
-            Graphics2D g2d = resized.createGraphics();
-            try {
-                g2d.drawImage(original.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH), 0, 0, null);
-            } finally {
-                g2d.dispose();
-            }
+            boolean sourceHasAlpha = original.getColorModel().hasAlpha();
+            String outFormat = resolveOutputFormat(target, sourceHasAlpha);
 
-            String fileName = target.getFileName().toString();
-            String formatName = "jpg";
-            int dotIdx = fileName.lastIndexOf('.');
-            if (dotIdx > 0) {
-                formatName = fileName.substring(dotIdx + 1);
-                if (formatName.equalsIgnoreCase("png")) formatName = "png";
-                else if (formatName.equalsIgnoreCase("webp")) formatName = "webp";
-                else formatName = "jpg";
+            BufferedImage resized;
+            if ("jpg".equalsIgnoreCase(outFormat) && sourceHasAlpha) {
+                resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+                Graphics2D g2d = resized.createGraphics();
+                try {
+                    g2d.setColor(java.awt.Color.WHITE);
+                    g2d.fillRect(0, 0, newWidth, newHeight);
+                    g2d.drawImage(original.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH), 0, 0, null);
+                } finally {
+                    g2d.dispose();
+                }
+            } else {
+                int imageType = sourceHasAlpha ? BufferedImage.TYPE_INT_ARGB : (original.getType() == 0 ? BufferedImage.TYPE_INT_RGB : original.getType());
+                resized = new BufferedImage(newWidth, newHeight, imageType);
+                Graphics2D g2d = resized.createGraphics();
+                try {
+                    g2d.drawImage(original.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH), 0, 0, null);
+                } finally {
+                    g2d.dispose();
+                }
             }
 
             FileUtils.createDirectories(target.getParent());
-            ImageIO.write(resized, formatName, target.toFile());
+            ImageIO.write(resized, outFormat, target.toFile());
         } catch (Exception e) {
             log.warn("Failed to resize image {}, falling back to copy: {}", source, e.getMessage());
             try {
@@ -72,5 +77,21 @@ public final class ImageUtils {
                 log.warn("Failed to copy image {} to {}: {}", source, target, ex.getMessage());
             }
         }
+    }
+
+    private static String resolveOutputFormat(Path target, boolean sourceHasAlpha) {
+        String fileName = target.getFileName().toString();
+        int dotIdx = fileName.lastIndexOf('.');
+        if (dotIdx <= 0) {
+            return sourceHasAlpha ? "png" : "jpg";
+        }
+        String ext = fileName.substring(dotIdx + 1).toLowerCase();
+        return switch (ext) {
+            case "png" -> "png";
+            case "webp" -> "webp";
+            case "gif" -> "gif";
+            case "bmp" -> "bmp";
+            default -> "jpg";
+        };
     }
 }

@@ -12,10 +12,23 @@ public final class ResponseHeaderHelper {
     }
 
     public static void setDownloadHeaders(ServerHttpResponse response, String filename, long fileSize) {
+        String safeName = escapeForHttpHeader(filename);
         String encoded = URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");
         response.getHeaders().setContentType(MediaType.APPLICATION_OCTET_STREAM);
         response.getHeaders().add("Content-Disposition",
-                "attachment; filename=\"" + filename + "\"; filename*=UTF-8''" + encoded);
+                "attachment; filename=\"" + safeName + "\"; filename*=UTF-8''" + encoded);
         response.getHeaders().setContentLength(fileSize);
+    }
+
+    private static String escapeForHttpHeader(String name) {
+        if (name == null) {
+            return "download";
+        }
+        String s = name.replace("\\", "_")
+                .replace("\"", "")
+                .replace("\r", "_")
+                .replace("\n", "_")
+                .strip();
+        return s.isEmpty() ? "download" : s;
     }
 }

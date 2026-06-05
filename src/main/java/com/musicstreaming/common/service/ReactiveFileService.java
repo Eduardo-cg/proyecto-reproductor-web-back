@@ -2,9 +2,9 @@ package com.musicstreaming.common.service;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.musicstreaming.common.util.FileUtils;
+import com.musicstreaming.common.util.FilenameSanitizer;
 import com.musicstreaming.common.util.ImageUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
@@ -20,15 +20,14 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
+@Slf4j
 public class ReactiveFileService {
 
-    private static final Logger log = LoggerFactory.getLogger(ReactiveFileService.class);
     private static final int CHUNK_SIZE_SEQUENTIAL = 256 * 1024;
     private static final int CHUNK_SIZE_RANDOM = 64 * 1024;
     private static final DataBufferFactory dataBufferFactory = DefaultDataBufferFactory.sharedInstance;
@@ -57,12 +56,11 @@ public class ReactiveFileService {
                 .then();
     }
 
-    public Mono<String> uploadFileWithSize(FilePart file, Long userId, String subfolder,
-                                           AtomicLong outSize) {
+    public Mono<String> uploadFileWithSize(FilePart file, Long userId, String subfolder, AtomicLong outSize) {
         String ext = FileUtils.getExtension(file.filename());
         String id = UUID.randomUUID().toString();
         String relativePath = userId + "/" + subfolder + "/" + id + "." + ext;
-        Path fullPath = Paths.get(storageBasePath, relativePath);
+        Path fullPath = FilenameSanitizer.safeResolve(storageBasePath, relativePath);
 
         return Mono.fromCallable(() -> {
                     FileUtils.createDirectories(fullPath.getParent());
@@ -86,8 +84,8 @@ public class ReactiveFileService {
         String id = UUID.randomUUID().toString();
         String relativePath = userId + "/" + category + "/" + id + "." + ext;
         String tempRelativePath = userId + "/" + category + "/" + id + "_temp." + ext;
-        Path tempFullPath = Paths.get(storageBasePath, tempRelativePath);
-        Path finalFullPath = Paths.get(storageBasePath, relativePath);
+        Path tempFullPath = FilenameSanitizer.safeResolve(storageBasePath, tempRelativePath);
+        Path finalFullPath = FilenameSanitizer.safeResolve(storageBasePath, relativePath);
 
         return Mono.fromCallable(() -> {
                     FileUtils.createDirectories(tempFullPath.getParent());
@@ -108,28 +106,40 @@ public class ReactiveFileService {
                         })
                         .subscribeOn(Schedulers.boundedElastic()))
                 .doOnError(e -> {
-                    try { Files.deleteIfExists(tempFullPath); } catch (Exception ex) { log.warn("Failed to delete temp file {}: {}", tempFullPath, ex.getMessage()); }
-                    try { Files.deleteIfExists(finalFullPath); } catch (Exception ex) { log.warn("Failed to delete final file {}: {}", finalFullPath, ex.getMessage()); }
+                    try {
+                        Files.deleteIfExists(tempFullPath);
+                    } catch (Exception ex) {
+                        log.warn("Failed to delete temp file {}: {}", tempFullPath, ex.getMessage());
+                    }
+                    try {
+                        Files.deleteIfExists(finalFullPath);
+                    } catch (Exception ex) {
+                        log.warn("Failed to delete final file {}: {}", finalFullPath, ex.getMessage());
+                    }
                 });
     }
 
-    public Mono<String> replaceCover(FilePart cover, Long userId, String category,
-                                     String oldPath, Long cacheId, Cache<Long, ?> cache) {
+    public Mono<String> replaceCover(FilePart cover, Long userId, String category, String oldPath, Long cacheId, Cache<Long, ?> cache) {
         return uploadCover(cover, userId, category)
                 .flatMap(newPath -> {
+                    Mono<Void> deleteOld = Mono.empty();
                     if (oldPath != null) {
-                        Path oldFullPath = Paths.get(storageBasePath, oldPath);
-                        deleteFileWithCache(oldFullPath, cacheId, cache)
-                                .doOnError(e -> log.warn("Failed to delete old cover: {}", e.getMessage()))
-                                .onErrorResume(e -> Mono.empty())
-                                .subscribe();
+                        Path oldFullPath = FilenameSanitizer.safeResolve(storageBasePath, oldPath);
+                        deleteOld = deleteFileWithCache(oldFullPath, cacheId, cache)
+                                .onErrorResume(e -> {
+                                    log.warn("Failed to delete old cover {}: {}", oldPath, e.getMessage());
+                                    return Mono.empty();
+                                });
                     }
-                    return Mono.just(newPath);
+                    return deleteOld.thenReturn(newPath);
                 });
     }
 
     public Path resolvePath(String relativePath) {
-        return Paths.get(storageBasePath, relativePath);
+        if (relativePath == null) {
+            throw new IllegalArgumentException("relativePath must not be null");
+        }
+        return FilenameSanitizer.safeResolve(storageBasePath, relativePath);
     }
 
     public Flux<DataBuffer> readFile(Path path, long start, long end, boolean sequential) {
@@ -158,12 +168,20 @@ public class ReactiveFileService {
                                 }
                             } catch (IOException e) {
                                 sink.error(e);
+                                try {
+                                    if (channel.isOpen()) {
+                                        channel.close();
+                                    }
+                                } catch (IOException ignored) {
+                                }
                             }
                             return channel;
                         },
                         channel -> {
                             try {
-                                channel.close();
+                                if (channel.isOpen()) {
+                                    channel.close();
+                                }
                             } catch (IOException ignored) {
                             }
                         })

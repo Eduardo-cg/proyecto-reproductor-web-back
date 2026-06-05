@@ -1,8 +1,7 @@
 package com.musicstreaming.common.service;
 
 import com.musicstreaming.common.util.ResponseHeaderHelper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
@@ -26,16 +25,15 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 @Service
+@Slf4j
 public class ZipDownloadService {
 
-    private static final Logger log = LoggerFactory.getLogger(ZipDownloadService.class);
     private static final DataBufferFactory dataBufferFactory = DefaultDataBufferFactory.sharedInstance;
 
     public record ZipEntryData(String entryName, Path filePath) {
     }
 
-    public Mono<Void> createAndSendZip(List<ZipEntryData> entries, String zipName,
-                                       ServerHttpResponse response) {
+    public Mono<Void> createAndSendZip(List<ZipEntryData> entries, String zipName, ServerHttpResponse response) {
         if (entries.isEmpty()) {
             response.setStatusCode(HttpStatus.NO_CONTENT);
             return Mono.empty();
